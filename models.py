@@ -4,7 +4,6 @@ from datetime import datetime
 
 db = SQLAlchemy()
 
-
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -167,3 +166,17 @@ class Reel(db.Model):
 
     shop = db.relationship("Shop")
     product = db.relationship("Product")
+
+
+class Withdrawal(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    shop_id = db.Column(db.Integer, db.ForeignKey("shop.id"), nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    bank_name = db.Column(db.String(100))
+    account_name = db.Column(db.String(100))
+    account_number = db.Column(db.String(20))
+    status = db.Column(db.String(20), default="PENDING") # PENDING | PAID | REJECTED
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    processed_at = db.Column(db.DateTime)
+
+    shop = db.relationship("Shop")

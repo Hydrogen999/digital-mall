@@ -6,7 +6,7 @@ import hmac
 import hashlib
 import requests
 from datetime import datetime, timedelta
-from sqlalchemy.pool import NullPool  # <-- NEW: Fixes the Render lock error
+from sqlalchemy.pool import NullPool
 
 from flask import (
     Flask, render_template, request, redirect, url_for, jsonify, flash,
@@ -25,7 +25,7 @@ except ImportError:
 
 from models import (
     db, User, Shop, Product, Conversation, Message,
-    Order, OrderItem, Review, Reel, Wishlist
+    Order, OrderItem, Review, Reel, Wishlist, Withdrawal
 )
 from sockets import socketio
 
@@ -71,20 +71,17 @@ def run_application_checks(form, files) -> dict:
 # PAYSTACK HELPER
 # ==================================================================
 def initialize_paystack(email, amount_ngn, callback_url, metadata=None):
-    """Sends a request to Paystack to generate a checkout URL."""
     url = "https://api.paystack.co/transaction/initialize"
     headers = {
         "Authorization": f"Bearer {PAYSTACK_SECRET_KEY}",
         "Content-Type": "application/json"
     }
-    # Paystack expects the amount in Kobo (₦1 = 100 Kobo)
     payload = {
         "email": email,
         "amount": int(amount_ngn * 100),
         "callback_url": callback_url,
         "metadata": metadata or {}
     }
-    
     response = requests.post(url, json=payload, headers=headers)
     if response.status_code == 200:
         return response.json()["data"]["authorization_url"]
@@ -98,12 +95,10 @@ app.config.update(
     SECRET_KEY=os.environ.get("SECRET_KEY", "dev-change-me-please"),
     SQLALCHEMY_DATABASE_URI=os.environ.get("DATABASE_URL", "sqlite:///mall.db"),
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
-    # --- THE FIX FOR RENDER ---
     SQLALCHEMY_ENGINE_OPTIONS={
         "poolclass": NullPool,
         "pool_pre_ping": True,
     },
-    # --------------------------
     UPLOAD_FOLDER=os.path.join(BASE_DIR, "static", "uploads"),
     MAX_CONTENT_LENGTH=16 * 1024 * 1024,
 )
@@ -541,7 +536,74 @@ def add_product():
     return redirect(url_for("dashboard"))
 
 # ==================================================================
-# ADMIN
+# WITHDRAWALS (VENDOR & ADMIN)
+# ==================================================================
+@app.route("/vendor/withdraw", methods=["POST"])
+@login_required
+def vendor_withdraw():
+    shop = current_user.shop
+    if not shop: return redirect(url_for("home"))
+    
+    amount = float(request.form.get("amount", 0))
+    bank_name = request.form.get("bank_name")
+    acc_name = request.form.get("account_name")
+    acc_num = request.form.get("account_number")
+
+    if amount <= 0 or amount > shop.wallet_balance:
+        flash("Invalid amount. You cannot withdraw more than your balance.", "error")
+        return redirect(url_for("dashboard"))
+
+    if not bank_name or not acc_name or not acc_num:
+        flash("Please fill in all bank details.", "error")
+        return redirect(url_for("dashboard"))
+
+    shop.wallet_balance -= amount
+    
+    withdrawal = Withdrawal(
+        shop_id=shop.id, amount=amount, 
+        bank_name=bank_name, account_name=acc_name, account_number=acc_num
+    )
+    db.session.add(withdrawal)
+    db.session.commit()
+    
+    flash("Withdrawal request submitted! Admin will process it shortly.", "success")
+    return redirect(url_for("dashboard"))
+
+@app.route("/admin/withdrawals")
+@login_required
+def admin_withdrawals():
+    if current_user.role != "admin": return redirect(url_for("home"))
+    pending = Withdrawal.query.filter_by(status="PENDING").order_by(Withdrawal.created_at.desc()).all()
+    history = Withdrawal.query.filter(Withdrawal.status != "PENDING").order_by(Withdrawal.processed_at.desc()).limit(20).all()
+    return render_template("admin_withdrawals.html", pending=pending, history=history)
+
+@app.route("/admin/withdrawals/<int:wid>/approve", methods=["POST"])
+@login_required
+def admin_approve_withdrawal(wid):
+    if current_user.role != "admin": return "Forbidden", 403
+    w = Withdrawal.query.get_or_404(wid)
+    if w.status == "PENDING":
+        w.status = "PAID"
+        w.processed_at = datetime.utcnow()
+        db.session.commit()
+        flash("Withdrawal marked as Paid.", "success")
+    return redirect(url_for("admin_withdrawals"))
+
+@app.route("/admin/withdrawals/<int:wid>/reject", methods=["POST"])
+@login_required
+def admin_reject_withdrawal(wid):
+    if current_user.role != "admin": return "Forbidden", 403
+    w = Withdrawal.query.get_or_404(wid)
+    if w.status == "PENDING":
+        w.status = "REJECTED"
+        w.processed_at = datetime.utcnow()
+        w.shop.wallet_balance += w.amount # Refund
+        db.session.commit()
+        flash("Withdrawal rejected and funds returned to vendor.", "success")
+    return redirect(url_for("admin_withdrawals"))
+
+# ==================================================================
+# ADMIN (Other)
 # ==================================================================
 @app.route("/admin/applications")
 @login_required

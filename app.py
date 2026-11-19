@@ -6,6 +6,7 @@ import hmac
 import hashlib
 import requests
 from datetime import datetime, timedelta
+from sqlalchemy.pool import NullPool  # <-- NEW: Fixes the Render lock error
 
 from flask import (
     Flask, render_template, request, redirect, url_for, jsonify, flash,
@@ -97,6 +98,12 @@ app.config.update(
     SECRET_KEY=os.environ.get("SECRET_KEY", "dev-change-me-please"),
     SQLALCHEMY_DATABASE_URI=os.environ.get("DATABASE_URL", "sqlite:///mall.db"),
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
+    # --- THE FIX FOR RENDER ---
+    SQLALCHEMY_ENGINE_OPTIONS={
+        "poolclass": NullPool,
+        "pool_pre_ping": True,
+    },
+    # --------------------------
     UPLOAD_FOLDER=os.path.join(BASE_DIR, "static", "uploads"),
     MAX_CONTENT_LENGTH=16 * 1024 * 1024,
 )
@@ -325,7 +332,6 @@ def checkout():
         total += p.price * qty
         lines.append((p, qty))
 
-    # 1. Create the Order in the database as "PENDING"
     order = Order(
         customer_id=current_user.id, total=total,
         reference="ORD-" + uuid.uuid4().hex[:8].upper(),
@@ -341,7 +347,6 @@ def checkout():
         p.stock -= qty
     db.session.commit()
 
-    # 2. Initialize Paystack
     callback_url = url_for('payment_success', reference=order.reference, _external=True)
     auth_url = initialize_paystack(current_user.email, total, callback_url)
 
@@ -349,14 +354,12 @@ def checkout():
         flash("Could not connect to payment gateway. Try again.", "error")
         return jsonify({"error": "Payment gateway error"}), 500
 
-    # 3. Send the Paystack URL back to the frontend
     return jsonify({"authorization_url": auth_url, "reference": order.reference})
 
 @app.route("/payment-success/<reference>")
 @login_required
 def payment_success(reference):
     order = Order.query.filter_by(reference=reference, customer_id=current_user.id).first_or_404()
-    # The webhook is the ultimate source of truth, but we can show a success page here
     return render_template("payment_success.html", order=order)
 
 @app.route("/orders")
@@ -379,16 +382,13 @@ def confirm_delivery(item_id):
     return redirect(url_for("orders"))
 
 # ==================================================================
-# PAYSTACK WEBHOOK (CRUCIAL FOR SECURITY)
+# PAYSTACK WEBHOOK
 # ==================================================================
 @app.route("/paystack-webhook", methods=["POST"])
 def paystack_webhook():
-    """Paystack pings this URL silently to confirm payments."""
     signature = request.headers.get('X-Paystack-Signature', '')
-    if not signature:
-        return 'Missing signature', 400
+    if not signature: return 'Missing signature', 400
 
-    # Verify the request actually came from Paystack
     computed_hash = hmac.new(
         PAYSTACK_SECRET_KEY.encode('utf-8'),
         msg=request.data,

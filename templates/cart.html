@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Cart · Mall{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto px-4 py-8">
+  <h1 class="text-3xl font-black mb-6">Your Cart</h1>
+
+  <div id="cart-container" class="space-y-3 hidden">
+    <div id="cart-items"></div>
+    
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 mt-6">
+      <div class="flex justify-between items-center mb-6">
+        <span class="text-lg text-slate-600">Total</span>
+        <span id="cart-total" class="text-2xl font-black text-amber-600">₦0.00</span>
+      </div>
+      
+      <form id="checkout-form" class="space-y-4">
+        <div>
+          <label class="text-sm font-medium">Delivery Address</label>
+          <input name="address" required placeholder="Enter your full address" class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
+        </div>
+        <div>
+          <label class="text-sm font-medium">Phone Number</label>
+          <input name="phone" required placeholder="08012345678" class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
+        </div>
+        <button type="submit" id="pay-btn" class="w-full py-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-lg shadow-lg transition">
+          Pay with Paystack
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <div id="empty-cart" class="text-center py-20 hidden">
+    <p class="text-6xl mb-4">🛒</p>
+    <h2 class="text-xl font-bold mb-2">Your cart is empty</h2>
+    <a href="/" class="text-amber-600 font-semibold hover:underline">Go shopping →</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const KEY = "mall_cart";
+  let cart = JSON.parse(localStorage.getItem(KEY) || "[]");
+
+  function renderCart() {
+    if (cart.length === 0) {
+      document.getElementById("empty-cart").classList.remove("hidden");
+      document.getElementById("cart-container").classList.add("hidden");
+      return;
+    }
+    
+    document.getElementById("empty-cart").classList.add("hidden");
+    document.getElementById("cart-container").classList.remove("hidden");
+    
+    const container = document.getElementById("cart-items");
+    let total = 0;
+    container.innerHTML = "";
+    
+    cart.forEach((item, index) => {
+      total += item.price * item.qty;
+      container.innerHTML += `
+        <div class="flex items-center justify-between bg-white border border-slate-200 p-3 rounded-xl mb-2">
+          <div class="flex items-center gap-3">
+            <img src="${item.image || 'https://via.placeholder.com/50'}" class="w-12 h-12 rounded-lg object-cover">
+            <div>
+              <div class="font-semibold text-sm">${item.name}</div>
+              <div class="text-xs text-slate-500">Qty: ${item.qty}</div>
+            </div>
+          </div>
+          <div class="flex items-center gap-4">
+            <span class="font-bold">₦${(item.price * item.qty).toLocaleString()}</span>
+            <button onclick="removeItem(${index})" class="text-red-500 text-sm hover:underline">Remove</button>
+          </div>
+        </div>
+      `;
+    });
+    
+    document.getElementById("cart-total").innerText = "₦" + total.toLocaleString();
+  }
+
+  function removeItem(index) {
+    cart.splice(index, 1);
+    localStorage.setItem(KEY, JSON.stringify(cart));
+    renderCart();
+  }
+
+  document.getElementById("checkout-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById("pay-btn");
+    btn.innerText = "Redirecting to Paystack...";
+    btn.disabled = true;
+
+    const fd = new FormData(e.target);
+    const payload = {
+      items: cart.map(i => ({ product_id: i.id, qty: i.qty })),
+      address: fd.get("address"),
+      phone: fd.get("phone")
+    };
+
+    try {
+      const res = await fetch("/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      
+      const data = await res.json();
+      
+      if (res.ok && data.authorization_url) {
+        localStorage.removeItem(KEY); // Clear cart
+        window.location.href = data.authorization_url; // Send to Paystack
+      } else {
+        alert(data.error || "Something went wrong");
+        btn.innerText = "Pay with Paystack";
+        btn.disabled = false;
+      }
+    } catch (err) {
+      alert("Network error. Try again.");
+      btn.innerText = "Pay with Paystack";
+      btn.disabled = false;
+    }
+  });
+
+  renderCart();
+</script>
+{% endblock %}

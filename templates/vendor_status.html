@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Application status · Mall{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 py-16">
+
+  {% if shop.verification_status == "PENDING_REVIEW" %}
+    <div class="text-center mb-6">
+      <div class="text-5xl mb-3">⏳</div>
+      <h1 class="text-2xl font-black">Application under review</h1>
+      <p class="text-slate-500 mt-2">
+        Our team is reviewing <b>{{ shop.name }}</b>. This usually takes less than 24 hours.
+        You'll be notified by email once a decision is made.
+      </p>
+    </div>
+
+  {% elif shop.verification_status == "APPROVED" and not shop.activation_paid %}
+    <div class="text-center mb-6">
+      <div class="text-5xl mb-3">🎉</div>
+      <h1 class="text-2xl font-black">You're approved!</h1>
+      <p class="text-slate-500 mt-2">
+        Pay the ₦{{ "{:,}".format(fee) }} one-time activation fee to make your shop live.
+      </p>
+      <a href="{{ url_for('pay_activation') }}"
+         class="inline-block mt-5 px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-semibold">
+        Pay ₦{{ "{:,}".format(fee) }} and activate my shop →
+      </a>
+    </div>
+
+  {% elif shop.verification_status == "REJECTED" %}
+    <div class="text-center mb-6">
+      <div class="text-5xl mb-3">⚠️</div>
+      <h1 class="text-2xl font-black">Application not approved</h1>
+      <p class="text-slate-500 mt-2">Here's why:</p>
+    </div>
+    <div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 text-sm">
+      {{ shop.rejection_reason }}
+    </div>
+    <div class="text-center mt-6">
+      <a href="{{ url_for('vendor_apply') }}"
+         class="inline-block px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-semibold">
+        Fix my application &amp; resubmit →
+      </a>
+    </div>
+  {% endif %}
+
+  <div class="mt-10 bg-white rounded-2xl border border-slate-200 p-5 text-sm">
+    <h2 class="font-bold mb-3">Application summary</h2>
+    <dl class="grid grid-cols-2 gap-y-2">
+      <dt class="text-slate-500">Shop</dt>       <dd>{{ shop.name }}</dd>
+      <dt class="text-slate-500">Category</dt>   <dd>{{ shop.category }}</dd>
+      <dt class="text-slate-500">Seller type</dt><dd>{{ shop.seller_type|capitalize }}</dd>
+      <dt class="text-slate-500">Phone</dt>      <dd>{{ shop.phone }}</dd>
+      <dt class="text-slate-500">Email</dt>      <dd>{{ shop.business_email }}</dd>
+      <dt class="text-slate-500">Location</dt>   <dd>{{ shop.city }}, {{ shop.state }}</dd>
+      <dt class="text-slate-500">Submitted</dt>  <dd>{{ shop.submitted_at.strftime("%d %b %Y, %H:%M") if shop.submitted_at else "—" }}</dd>
+    </dl>
+  </div>
+</div>
+{% endblock %}

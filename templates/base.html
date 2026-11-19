@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Mall{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { colors: { brand: { DEFAULT: '#0f172a', accent: '#f59e0b' } } } } }
+  </script>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+  <header class="sticky top-0 z-40 backdrop-blur bg-white/80 border-b border-slate-200">
+    <div class="max-w-7xl mx-auto px-4 h-16 flex items-center gap-4">
+      <a href="/" class="text-xl font-black tracking-tight">MALL<span class="text-amber-500">.</span></a>
+      <form class="flex-1 max-w-xl" action="/search" method="GET">
+        <input name="q" placeholder="Search shops, brands, products…" class="w-full px-4 py-2 rounded-full border border-slate-200 bg-slate-100 focus:bg-white focus:ring-2 focus:ring-amber-400 outline-none">
+      </form>
+      {% if current_user.is_authenticated %}
+        {% if current_user.role == 'admin' %}
+          <a href="/admin/applications" class="text-sm font-bold text-amber-600">Admin</a>
+        {% endif %}
+        <a href="/wishlist" class="text-sm font-medium">Wishlist</a>
+        <a href="/dashboard" class="text-sm font-medium">Dashboard</a>
+        <a href="/logout" class="text-sm text-slate-500">Logout</a>
+      {% else %}
+        <a href="/login" class="text-sm font-medium">Login</a>
+      {% endif %}
+      <a href="/cart" class="text-sm font-medium relative">Cart</a>
+    </div>
+  </header>
+  
+  <main>{% block content %}{% endblock %}</main>
+
+  <!-- THIS WAS MISSING: It loads the JavaScript for all pages -->
+  {% block scripts %}{% endblock %}
+
+</body>
+</html>

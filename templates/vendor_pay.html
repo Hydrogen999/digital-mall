@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Activate your shop · Mall{% endblock %}
+{% block content %}
+<div class="max-w-xl mx-auto px-4 py-16">
+  <div class="text-center mb-8">
+    <div class="text-5xl mb-3">🔓</div>
+    <h1 class="text-3xl font-black">One last step — activate your shop</h1>
+    <p class="text-slate-500 mt-2">
+      Pay the one-time ₦{{ "{:,}".format(fee) }} activation fee to make <b>{{ shop.name }}</b>
+      visible to buyers across Mall. This fee covers identity verification and setup — you'll
+      never pay it again.
+    </p>
+  </div>
+
+  <div class="bg-white rounded-2xl border border-slate-200 p-6">
+    <div class="flex justify-between items-center border-b pb-3 mb-4">
+      <span class="text-slate-500">One-time activation</span>
+      <span class="text-2xl font-black">₦{{ "{:,}".format(fee) }}</span>
+    </div>
+
+    <div class="text-sm text-slate-500 space-y-2 mb-6">
+      <p>✓ Verified badge shown on your shop</p>
+      <p>✓ Your products listed on the homepage</p>
+      <p>✓ Ability to publish promotional reels</p>
+      <p>✓ Live chat with customers</p>
+    </div>
+
+    <form method="POST">
+      <button class="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-semibold">
+        Pay ₦{{ "{:,}".format(fee) }} and activate
+      </button>
+    </form>
+
+    <p class="text-xs text-slate-400 text-center mt-4">
+      🔒 In production, this button will open a Paystack / Stripe checkout.
+      For now, clicking it marks the payment as complete so you can test the flow.
+    </p>
+  </div>
+</div>
+{% endblock %}

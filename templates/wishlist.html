@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 py-8">
+  <h1 class="text-3xl font-black mb-6">My Wishlist</h1>
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    {% for w in items %}
+      <div class="bg-white border rounded-2xl p-2">
+        <a href="/product/{{ w.product.id }}"><img src="{{ w.product.image }}" class="w-full aspect-square object-cover rounded-xl"></a>
+        <div class="p-2">
+          <div class="text-sm font-semibold truncate">{{ w.product.name }}</div>
+          <div class="font-bold text-amber-600">₦{{ "{:,.2f}".format(w.product.price) }}</div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+  {% if not items %}<p class="text-slate-400">Your wishlist is empty.</p>{% endif %}
+</div>
+{% endblock %}

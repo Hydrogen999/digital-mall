@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}Vendor Verification · Mall{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto px-4 py-10">
+
+  <div class="text-center mb-8">
+    <h1 class="text-3xl font-black">Get verified to open your shop</h1>
+    <p class="text-slate-500 mt-2 max-w-lg mx-auto">
+      We verify every vendor before their shop goes live — so buyers on Mall know they're
+      dealing with a real, honest business. It takes about 5 minutes.
+    </p>
+  </div>
+
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in msgs %}
+      <div class="mb-4 rounded-xl p-3 text-sm
+        {{ 'bg-red-50 text-red-700 border border-red-200' if cat == 'error' else 'bg-green-50 text-green-700 border border-green-200' }}">
+        {{ msg }}
+      </div>
+    {% endfor %}
+  {% endwith %}
+
+  <!-- Progress -->
+  <div class="flex items-center gap-2 mb-6 text-xs font-semibold text-slate-400">
+    {% for i in range(1, 6) %}
+      <div class="step-dot flex-1 h-1.5 rounded-full bg-slate-200" data-dot="{{ i }}"></div>
+    {% endfor %}
+  </div>
+
+  <form method="POST" enctype="multipart/form-data" id="apply-form"
+        class="bg-white rounded-2xl border border-slate-200 p-6 space-y-6">
+
+    <!-- STEP 1: Business basics -->
+    <fieldset data-step="1" class="space-y-4">
+      <h2 class="text-lg font-bold">1. Business basics</h2>
+      <div>
+        <label class="text-sm font-medium">Shop name (as it will appear to customers)</label>
+        <input name="name" required value="{{ form.get('name','') }}"
+               class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
+      </div>
+      <div class="grid md:grid-cols-2 gap-3">
+        <div>
+          <label class="text-sm font-medium">Category</label>
+          <select name="category" required class="w-full mt-1 px-3 py-2 border rounded-lg">
+            <option value="">Choose…</option>
+            {% for c in ["Watches","Fashion","Luxury","Electronics","Beauty","Home & Living","Sports","Kids","Other"] %}
+              <option {{ 'selected' if form.get('category')==c else '' }}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="text-sm font-medium">Seller type</label>
+          <select name="seller_type" required class="w-full mt-1 px-3 py-2 border rounded-lg">
+            <option value="business" {{ 'selected' if form.get('seller_type')=='business' else '' }}>Registered business</option>
+            <option value="individual" {{ 'selected' if form.get('seller_type')=='individual' else '' }}>Individual seller</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label class="text-sm font-medium">Legal / registered name (if different)</label>
+        <input name="legal_name" value="{{ form.get('legal_name','') }}"
+               class="w-full mt-1 px-3 py-2 border rounded-lg">
+      </div>
+      <div>
+        <label class="text-sm font-medium">Shop description (tell customers what you sell)</label>
+        <textarea name="description" required rows="3" class="w-full mt-1 px-3 py-2 border rounded-lg">{{ form.get('description','') }}</textarea>
+      </div>
+    </fieldset>
+
+    <!-- STEP 2: Contact & location -->
+    <fieldset data-step="2" class="space-y-4 hidden">
+      <h2 class="text-lg font-bold">2. Contact &amp; location</h2>
+      <div class="grid md:grid-cols-2 gap-3">
+        <div>
+          <label class="text-sm font-medium">Phone number</label>
+          <input name="phone" required placeholder="08012345678" value="{{ form.get('phone','') }}"
+                 class="w-full mt-1 px-3 py-2 border rounded-lg">
+          <p class="text-xs text-slate-500 mt-1">Nigerian number. We use this to contact you.</p>
+        </div>
+        <div>
+          <label class="text-sm font-medium">WhatsApp (optional)</label>
+          <input name="whatsapp" value="{{ form.get('whatsapp','') }}" class="w-full mt-1 px-3 py-2 border rounded-lg">
+        </div>
+      </div>
+      <div>
+        <label class="text-sm font-medium">Business email</label>
+        <input name="business_email" type="email" required value="{{ form.get('business_email','') }}"
+               class="w-full mt-1 px-3 py-2 border rounded-lg">
+      </div>
+      <div>
+        <label class="text-sm font-medium">Business address</label>
+        <input name="address" required value="{{ form.get('address','') }}" class="w-full mt-1 px-3 py-2 border rounded-lg">
+      </div>
+      <div class="grid md:grid-cols-2 gap-3">
+        <div>
+          <label class="text-sm font-medium">City</label>
+          <input name="city" required value="{{ form.get('city','') }}" class="w-full mt-1 px-3 py-2 border rounded-lg">
+        </div>
+        <div>
+          <label class="text-sm font-medium">State</label>
+          <input name="state" required value="{{ form.get('state','') }}" class="w-full mt-1 px-3 py-2 border rounded-lg">
+        </div>
+      </div>
+    </fieldset>
+
+    <!-- STEP 3: Identity & registration -->
+    <fieldset data-step="3" class="space-y-4 hidden">
+      <h2 class="text-lg font-bold">3. Identity &amp; registration</h2>
+      <div>
+        <label class="text-sm font-medium">CAC / RC number (registered businesses only)</label>
+        <input name="cac_number" value="{{ form.get('cac_number','') }}"
+               class="w-full mt-1 px-3 py-2 border rounded-lg" placeholder="e.g. RC-1234567">
+        <p class="text-xs text-slate-500 mt-1">Required if you chose "Registered business".</p>
+      </div>
+      <div class="grid md:grid-cols-2 gap-3">
+        <div>
+          <label class="text-sm font-medium">ID type</label>
+          <select name="id_type" required class="w-full mt-1 px-3 py-2 border rounded-lg">
+            {% for t in ["NIN","International Passport","Driver's License","Voter's Card"] %}
+              <option {{ 'selected' if form.get('id_type')==t else '' }}>{{ t }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="text-sm font-medium">ID number</label>
+          <input name="id_number" required value="{{ form.get('id_number','') }}"
+                 class="w-full mt-1 px-3 py-2 border rounded-lg">
+        </div>
+      </div>
+      <div>
+        <label class="text-sm font-medium">Upload a photo of your ID</label>
+        <input name="id_image" type="file" accept="image/*" required class="block mt-1 text-sm">
+        <p class="text-xs text-slate-500 mt-1">Your ID is used only for verification — never shown publicly.</p>
+      </div>
+    </fieldset>
+
+    <!-- STEP 4: Products & social proof -->
+    <fieldset data-step="4" class="space-y-4 hidden">
+      <h2 class="text-lg font-bold">4. Products &amp; social proof</h2>
+      <div>
+        <label class="text-sm font-medium">What will you sell? (short summary)</label>
+        <textarea name="product_summary" required rows="2" class="w-full mt-1 px-3 py-2 border rounded-lg">{{ form.get('product_summary','') }}</textarea>
+      </div>
+      <div>
+        <label class="text-sm font-medium">Price range</label>
+        <input name="price_range" required value="{{ form.get('price_range','') }}"
+               placeholder="e.g. ₦5,000 – ₦50,000" class="w-full mt-1 px-3 py-2 border rounded-lg">
+      </div>
+      <div>
+        <label class="text-sm font-medium">Links to your business online (one per line)</label>
+        <textarea name="social_links" rows="3" class="w-full mt-1 px-3 py-2 border rounded-lg"
+                  placeholder="https://instagram.com/yourshop&#10;https://yourshop.com">{{ form.get('social_links','') }}</textarea>
+      </div>
+    </fieldset>
+
+    <!-- STEP 5: Photos & agreement -->
+    <fieldset data-step="5" class="space-y-4 hidden">
+      <h2 class="text-lg font-bold">5. Brand photos &amp; agreement</h2>
+      <div>
+        <label class="text-sm font-medium">Shop logo (optional)</label>
+        <input name="logo" type="file" accept="image/*" class="block mt-1 text-sm">
+      </div>
+      <div>
+        <label class="text-sm font-medium">Cover banner (optional)</label>
+        <input name="banner" type="file" accept="image/*" class="block mt-1 text-sm">
+      </div>
+      <label class="flex items-start gap-2 text-sm">
+        <input type="checkbox" required class="mt-1">
+        <span>
+          I confirm that every detail I've provided is true and accurate. I understand
+          that false information may result in permanent removal from Mall, and that
+          submitting this application does <b>not</b> make my shop live — my shop must
+          be approved by Mall's team and the ₦{{ "{:,}".format(10000) }} activation fee paid first.
+        </span>
+      </label>
+    </fieldset>
+
+    <div class="flex justify-between pt-2 border-t">
+      <button type="button" id="prev-btn" class="px-4 py-2 text-sm font-semibold text-slate-500 hidden">
+        ← Back
+      </button>
+      <button type="button" id="next-btn" class="ml-auto px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-semibold">
+        Continue →
+      </button>
+      <button type="submit" id="submit-btn" class="ml-auto px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-semibold hidden">
+        Submit application
+      </button>
+    </div>
+  </form>
+</div>
+
+<script>
+  const totalSteps = 5;
+  let step = 1;
+  const steps      = document.querySelectorAll("[data-step]");
+  const dots       = document.querySelectorAll(".step-dot");
+  const prevBtn    = document.getElementById("prev-btn");
+  const nextBtn    = document.getElementById("next-btn");
+  const submitBtn  = document.getElementById("submit-btn");
+
+  function render() {
+    steps.forEach(s => s.classList.toggle("hidden", +s.dataset.step !== step));
+    dots.forEach(d => {
+      d.classList.toggle("bg-amber-500", +d.dataset.dot <= step);
+      d.classList.toggle("bg-slate-200", +d.dataset.dot >  step);
+    });
+    prevBtn.classList.toggle("hidden", step === 1);
+    nextBtn.classList.toggle("hidden", step === totalSteps);
+    submitBtn.classList.toggle("hidden", step !== totalSteps);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  nextBtn.addEventListener("click", () => {
+    // Validate current step's required fields
+    const current = document.querySelector(`[data-step="${step}"]`);
+    const invalid = [...current.querySelectorAll("[required]")].find(el => !el.checkValidity());
+    if (invalid) { invalid.reportValidity(); return; }
+    if (step < totalSteps) { step++; render(); }
+  });
+  prevBtn.addEventListener("click", () => { if (step > 1) { step--; render(); } });
+
+  render();
+</script>
+{% endblock %}

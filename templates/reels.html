@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block content %}
+<div id="feed" class="h-[calc(100vh-4rem)] overflow-y-scroll snap-y snap-mandatory bg-black text-white">
+  {% for r in reels %}
+    <section class="relative h-full snap-start flex items-center justify-center" data-reel="{{ r.id }}">
+      <video src="{{ r.video_url }}" poster="{{ r.poster_url }}"
+             class="h-full w-full object-contain" loop playsinline muted></video>
+
+      <div class="absolute inset-x-0 bottom-0 p-6 pb-10 bg-gradient-to-t from-black/85 to-transparent">
+        <div class="max-w-3xl mx-auto flex items-end justify-between gap-4">
+          <div class="min-w-0">
+            {% if r.is_sponsored %}
+              <span class="text-[10px] bg-amber-500 text-black px-2 py-0.5 rounded-full font-bold">SPONSORED</span>
+            {% endif %}
+            <a href="/shop/{{ r.shop.slug }}" class="flex items-center gap-2 mt-2 font-bold">
+              {% if r.shop.logo %}<img src="{{ r.shop.logo }}" class="w-9 h-9 rounded-full object-cover">{% endif %}
+              {{ r.shop.name }}
+            </a>
+            <p class="mt-2 text-sm text-white/90 line-clamp-2">{{ r.caption }}</p>
+            {% if r.product %}
+              <p class="mt-1 text-sm font-semibold">{{ r.product.name }} · ${{ "%.2f"|format(r.product.price) }}</p>
+            {% endif %}
+            <div class="mt-3 flex gap-2">
+              <a href="/shop/{{ r.shop.slug }}" class="px-4 py-2 bg-white text-black rounded-full text-sm font-semibold">Visit shop</a>
+              <a href="/chat/{{ r.shop.slug }}" class="px-4 py-2 bg-white/20 backdrop-blur rounded-full text-sm font-semibold">Chat</a>
+            </div>
+          </div>
+          <div class="flex flex-col items-center gap-4">
+            <button class="like-btn text-center" data-rid="{{ r.id }}">
+              <div class="text-2xl">❤</div>
+              <div class="text-xs">{{ r.likes }}</div>
+            </button>
+            <button class="share-btn text-center" data-url="{{ request.host_url }}shop/{{ r.shop.slug }}">
+              <div class="text-2xl">🔗</div>
+              <div class="text-xs">Share</div>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  {% endfor %}
+  {% if not reels %}
+    <section class="h-full grid place-items-center text-white/60">
+      <p>No promotional reels yet — check back soon.</p>
+    </section>
+  {% endif %}
+</div>
+
+<script>
+  // Autoplay the visible reel only
+  const videos = document.querySelectorAll("#feed video");
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      const v = e.target;
+      if (e.isIntersecting) {
+        v.muted = false; v.play().catch(() => {});
+        // Count a view once per session
+        const rid = v.closest("[data-reel]").dataset.reel;
+        if (!v.dataset.counted) {
+          v.dataset.counted = "1";
+          fetch(`/reels/${rid}/view`, { method: "POST" });
+        }
+      } else { v.pause(); }
+    });
+  }, { threshold: 0.6 });
+  videos.forEach(v => io.observe(v));
+
+  // Likes
+  document.querySelectorAll(".like-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const r = await fetch(`/reels/${btn.dataset.rid}/like`, { method: "POST" });
+      if (r.status === 401) { location.href = "/login"; return; }
+      const d = await r.json();
+      btn.querySelector("div:last-child").textContent = d.likes;
+    });
+  });
+
+  // Share
+  document.querySelectorAll(".share-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const url = btn.dataset.url;
+      if (navigator.share) navigator.share({ url });
+      else { navigator.clipboard.writeText(url); alert("Link copied!"); }
+    });
+  });
+</script>
+{% endblock %}

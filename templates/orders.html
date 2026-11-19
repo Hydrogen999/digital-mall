@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}My Orders · Mall{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto px-4 py-8">
+  <h1 class="text-3xl font-black mb-6">My Orders</h1>
+
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in msgs %}
+      <div class="mb-4 rounded-xl p-3 text-sm {{ 'bg-green-50 text-green-700 border border-green-200' if cat=='success' else 'bg-red-50 text-red-700 border border-red-200' }}">
+        {{ msg }}
+      </div>
+    {% endfor %}
+  {% endwith %}
+
+  {% for o in orders %}
+    <div class="bg-white border border-slate-200 rounded-2xl p-5 mb-4 shadow-sm">
+      <div class="flex justify-between items-center border-b pb-3 mb-3">
+        <div>
+          <div class="font-bold">Order #{{ o.reference }}</div>
+          <div class="text-xs text-slate-500">{{ o.created_at.strftime("%d %b %Y, %H:%M") }}</div>
+        </div>
+        <span class="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-600 font-semibold uppercase">
+          {{ o.status }}
+        </span>
+      </div>
+
+      <div class="space-y-3">
+        {% for i in o.items %}
+          <div class="flex justify-between items-center">
+            <div>
+              <div class="font-medium text-sm">{{ i.name }} × {{ i.qty }}</div>
+              <div class="text-xs text-slate-500">₦{{ "{:,.2f}".format(i.price * i.qty) }}</div>
+            </div>
+            <div>
+              {% if i.status == 'PAID' %}
+                <span class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">Processing</span>
+              {% elif i.status == 'SHIPPED' %}
+                <form method="POST" action="/order/confirm-delivery/{{ i.id }}">
+                  <button class="text-xs bg-green-500 hover:bg-green-600 text-white px-3 py-1.5 rounded font-bold">
+                    Received Item
+                  </button>
+                </form>
+              {% else %}
+                <span class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">Delivered</span>
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+
+      <div class="mt-4 pt-3 border-t flex justify-between items-center">
+        <span class="text-sm text-slate-500">Total</span>
+        <span class="text-lg font-bold text-amber-600">₦{{ "{:,.2f}".format(o.total) }}</span>
+      </div>
+    </div>
+  {% endfor %}
+
+  {% if not orders %}
+    <div class="text-center py-20 text-slate-400">
+      <p class="text-5xl mb-3">📦</p>
+      <p>You haven't placed any orders yet.</p>
+      <a href="/" class="inline-block mt-4 px-5 py-2.5 bg-amber-500 text-white rounded-lg font-semibold">Start shopping</a>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

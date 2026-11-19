@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Sign in · Mall{% endblock %}
+{% block content %}
+<div class="max-w-md mx-auto px-4 py-16">
+
+  <div class="text-center mb-8">
+    <h1 class="text-3xl font-black">Welcome to <span class="text-amber-500">Mall.</span></h1>
+    <p class="text-slate-500 text-sm mt-2">Sign in or create an account to start shopping.</p>
+  </div>
+
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in msgs %}
+      <div class="mb-4 rounded-xl p-3 text-sm
+        {{ 'bg-red-50 text-red-700 border border-red-200' if cat == 'error' else 'bg-green-50 text-green-700 border border-green-200' }}">
+        {{ msg }}
+      </div>
+    {% endfor %}
+  {% endwith %}
+
+  <!-- Tabs -->
+  <div class="flex bg-slate-100 p-1 rounded-xl mb-4">
+    <button data-tab="login" class="auth-tab flex-1 py-2 rounded-lg text-sm font-semibold bg-white shadow-sm">Sign in</button>
+    <button data-tab="register" class="auth-tab flex-1 py-2 rounded-lg text-sm font-semibold text-slate-600">Create account</button>
+  </div>
+
+  <!-- LOGIN form -->
+  <form data-panel="login" method="POST" action="/login"
+        class="auth-panel bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+    <div>
+      <label class="text-sm font-medium">Email</label>
+      <input name="email" type="email" required
+             class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
+    </div>
+    <div>
+      <label class="text-sm font-medium">Password</label>
+      <input name="password" type="password" required
+             class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
+    </div>
+    <button class="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-semibold">
+      Sign in
+    </button>
+  </form>
+
+  <!-- REGISTER form -->
+  <form data-panel="register" method="POST" action="/register"
+        class="auth-panel hidden bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+    <div>
+      <label class="text-sm font-medium">Full name</label>
+      <input name="username" required
+             class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
+    </div>
+    <div>
+      <label class="text-sm font-medium">Email</label>
+      <input name="email" type="email" required
+             class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
+    </div>
+    <div>
+      <label class="text-sm font-medium">Password</label>
+      <input name="password" type="password" required minlength="6"
+             class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
+    </div>
+    <div>
+      <label class="text-sm font-medium">I want to…</label>
+      <div class="mt-1 grid grid-cols-2 gap-2">
+        <label class="border rounded-lg p-3 cursor-pointer has-[:checked]:border-amber-500 has-[:checked]:bg-amber-50">
+          <input type="radio" name="role" value="customer" checked class="mr-2">Shop
+        </label>
+        <label class="border rounded-lg p-3 cursor-pointer has-[:checked]:border-amber-500 has-[:checked]:bg-amber-50">
+          <input type="radio" name="role" value="vendor" class="mr-2">Sell
+        </label>
+      </div>
+    </div>
+    <button class="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-semibold">
+      Create account
+    </button>
+  </form>
+
+</div>
+
+<script>
+  document.querySelectorAll(".auth-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".auth-tab").forEach(t => {
+        t.classList.remove("bg-white", "shadow-sm");
+        t.classList.add("text-slate-600");
+      });
+      tab.classList.add("bg-white", "shadow-sm");
+      tab.classList.remove("text-slate-600");
+      document.querySelectorAll(".auth-panel").forEach(p => p.classList.add("hidden"));
+      document.querySelector(`[data-panel="${tab.dataset.tab}"]`).classList.remove("hidden");
+    });
+  });
+</script>
+{% endblock %}

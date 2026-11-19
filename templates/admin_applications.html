@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Vendor applications · Admin{% endblock %}
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-8">
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-3xl font-black">Vendor applications</h1>
+    <a href="{{ url_for('admin_reels') }}" class="text-sm text-amber-600 font-semibold">Reel moderation →</a>
+  </div>
+
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in msgs %}
+      <div class="mb-4 rounded-xl p-3 text-sm
+        {{ 'bg-red-50 text-red-700 border border-red-200' if cat=='error' else 'bg-green-50 text-green-700 border border-green-200' }}">{{ msg }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  <h2 class="text-lg font-bold mb-3">Pending review ({{ pending|length }})</h2>
+  <div class="space-y-4 mb-10">
+    {% for s in pending %}
+      {% set flags = s.auto_flags|from_json if s.auto_flags else [] %}
+      <div class="bg-white rounded-2xl border border-slate-200 p-5">
+        <div class="flex justify-between items-start flex-wrap gap-2">
+          <div>
+            <h3 class="text-lg font-bold">{{ s.name }}</h3>
+            <p class="text-sm text-slate-500">
+              {{ s.category }} · {{ s.seller_type|capitalize }} · submitted {{ s.submitted_at.strftime("%d %b, %H:%M") if s.submitted_at else "—" }}
+            </p>
+          </div>
+          <span class="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700 font-semibold">PENDING</span>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-4 mt-4 text-sm">
+          <div class="space-y-1">
+            <p><span class="text-slate-500">Legal name:</span> {{ s.legal_name or "—" }}</p>
+            <p><span class="text-slate-500">Phone:</span> {{ s.phone or "—" }}</p>
+            <p><span class="text-slate-500">Email:</span> {{ s.business_email or "—" }}</p>
+            <p><span class="text-slate-500">Address:</span> {{ s.address }}, {{ s.city }}, {{ s.state }}</p>
+          </div>
+          <div class="space-y-1">
+            <p><span class="text-slate-500">CAC/RC:</span> {{ s.cac_number or "— (individual)" }}</p>
+            <p><span class="text-slate-500">ID:</span> {{ s.id_type }} — {{ s.id_number }}</p>
+            <p><span class="text-slate-500">Price range:</span> {{ s.price_range or "—" }}</p>
+            <p><span class="text-slate-500">Products:</span> {{ s.product_summary or "—" }}</p>
+          </div>
+        </div>
+
+        {% if s.description %}
+          <p class="mt-3 text-sm text-slate-600"><b>Description:</b> {{ s.description }}</p>
+        {% endif %}
+
+        {% if s.social_links %}
+          <p class="mt-2 text-sm">
+            <b>Social links:</b>
+            {% for l in s.social_links|from_json %}
+              <a href="{{ l }}" target="_blank" class="text-amber-600 underline mr-2">{{ l }}</a>
+            {% endfor %}
+          </p>
+        {% endif %}
+
+        {% if s.id_image %}
+          <div class="mt-3">
+            <p class="text-sm text-slate-500 mb-1">ID document:</p>
+            <a href="{{ s.id_image }}" target="_blank">
+              <img src="{{ s.id_image }}" class="h-32 rounded-lg border">
+            </a>
+          </div>
+        {% endif %}
+
+        {% if flags %}
+          <div class="mt-3 rounded-xl bg-red-50 border border-red-200 p-3">
+            <p class="text-xs font-bold text-red-700 mb-1">⚠ Auto-checks found:</p>
+            <ul class="text-xs text-red-700 list-disc list-inside space-y-0.5">
+              {% for f in flags %}<li>{{ f }}</li>{% endfor %}
+            </ul>
+          </div>
+        {% else %}
+          <div class="mt-3 rounded-xl bg-green-50 border border-green-200 p-3">
+            <p class="text-xs font-bold text-green-700">✓ All auto-checks passed</p>
+          </div>
+        {% endif %}
+
+        <div class="flex gap-2 mt-4">
+          <form method="POST" action="{{ url_for('admin_approve', sid=s.id) }}">
+            <button class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold">✓ Approve</button>
+          </form>
+          <form method="POST" action="{{ url_for('admin_reject', sid=s.id) }}"
+                onsubmit="return promptForReason(this)">
+            <input type="hidden" name="reason">
+            <button class="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold">✗ Reject</button>
+          </form>
+        </div>
+      </div>
+    {% endfor %}
+    {% if not pending %}
+      <p class="text-slate-400 text-sm py-6 text-center bg-white rounded-2xl border border-slate-200">No pending applications.</p>
+    {% endif %}
+  </div>
+
+  {% if approved %}
+    <h2 class="text-lg font-bold mb-3">Approved · awaiting payment ({{ approved|length }})</h2>
+    <div class="space-y-2 mb-8">
+      {% for s in approved %}
+        <div class="bg-white rounded-xl border border-slate-200 p-3 flex justify-between text-sm">
+          <span><b>{{ s.name }}</b> · {{ s.phone }}</span>
+          <span class="text-xs text-slate-500">approved {{ s.reviewed_at.strftime("%d %b") if s.reviewed_at else "" }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if rejected %}
+    <h2 class="text-lg font-bold mb-3">Rejected ({{ rejected|length }})</h2>
+    <div class="space-y-2 mb-8">
+      {% for s in rejected %}
+        <div class="bg-white rounded-xl border border-slate-200 p-3 text-sm">
+          <b>{{ s.name }}</b> — <span class="text-red-600">{{ s.rejection_reason }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if active %}
+    <h2 class="text-lg font-bold mb-3">Active shops ({{ active|length }})</h2>
+    <div class="space-y-2">
+      {% for s in active %}
+        <a href="{{ url_for('shop_page', slug=s.slug) }}" target="_blank"
+           class="block bg-white rounded-xl border border-slate-200 p-3 text-sm hover:border-amber-400">
+          <b>{{ s.name }}</b> · {{ s.category }} · {{ s.phone }}
+        </a>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>
+
+<script>
+  function promptForReason(form) {
+    const reason = prompt("Reason for rejecting this application:");
+    if (!reason || reason.trim().length < 5) return false;
+    form.reason.value = reason.trim();
+    return true;
+  }
+</script>
+{% endblock %}

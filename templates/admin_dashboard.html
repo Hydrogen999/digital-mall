@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Admin Dashboard · Mall{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-8">
+  <div class="flex items-center justify-between mb-8">
+    <div>
+      <h1 class="text-3xl font-black">Platform Overview</h1>
+      <p class="text-slate-500 text-sm mt-1">Welcome back, Admin. Here is what's happening on your platform.</p>
+    </div>
+    <a href="/" class="text-sm font-semibold text-amber-600 hover:underline">View Public Site →</a>
+  </div>
+
+  <!-- Revenue Cards -->
+  <div class="grid md:grid-cols-3 gap-4 mb-8">
+    <div class="bg-slate-900 text-white p-6 rounded-2xl shadow-lg relative overflow-hidden">
+      <div class="absolute -right-4 -top-4 text-8xl opacity-10">💰</div>
+      <div class="text-sm text-slate-400 font-medium">Total Platform Revenue</div>
+      <div class="text-4xl font-black mt-2">₦{{ "{:,.2f}".format(stats.total_revenue) }}</div>
+      <div class="mt-4 flex gap-4 text-xs text-slate-300">
+        <div>Subs: ₦{{ "{:,.0f}".format(stats.sub_revenue) }}</div>
+        <div>Fees: ₦{{ "{:,.0f}".format(stats.commission_revenue) }}</div>
+      </div>
+    </div>
+    
+    <div class="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
+      <div class="text-sm text-slate-500 font-medium">Active Shops</div>
+      <div class="text-4xl font-black text-slate-800 mt-2">{{ stats.active_shops }}</div>
+      <div class="mt-4 text-xs text-slate-500">Out of {{ stats.total_users }} total users</div>
+    </div>
+
+    <div class="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
+      <div class="text-sm text-slate-500 font-medium">Total Orders</div>
+      <div class="text-4xl font-black text-slate-800 mt-2">{{ stats.total_orders }}</div>
+      <div class="mt-4 text-xs text-slate-500">Across {{ stats.total_products }} products</div>
+    </div>
+  </div>
+
+  <!-- Action Center -->
+  <h2 class="text-xl font-bold mb-4">Action Center</h2>
+  <div class="grid md:grid-cols-2 gap-4">
+    
+    <!-- Pending Applications -->
+    <a href="{{ url_for('admin_applications') }}" class="block bg-white border border-slate-200 rounded-2xl p-6 hover:shadow-md transition group">
+      <div class="flex justify-between items-start">
+        <div>
+          <div class="text-lg font-bold group-hover:text-amber-600 transition">Vendor Applications</div>
+          <p class="text-sm text-slate-500 mt-1">Review new businesses wanting to join.</p>
+        </div>
+        <div class="w-12 h-12 rounded-full {{ 'bg-red-100 text-red-600' if stats.pending_apps > 0 else 'bg-slate-100 text-slate-400' }} grid place-items-center font-bold text-lg">
+          {{ stats.pending_apps }}
+        </div>
+      </div>
+    </a>
+
+    <!-- Pending Withdrawals -->
+    <a href="{{ url_for('admin_withdrawals') }}" class="block bg-white border border-slate-200 rounded-2xl p-6 hover:shadow-md transition group">
+      <div class="flex justify-between items-start">
+        <div>
+          <div class="text-lg font-bold group-hover:text-emerald-600 transition">Vendor Withdrawals</div>
+          <p class="text-sm text-slate-500 mt-1">Approve payouts for vendors.</p>
+        </div>
+        <div class="w-12 h-12 rounded-full {{ 'bg-red-100 text-red-600' if stats.pending_payouts > 0 else 'bg-slate-100 text-slate-400' }} grid place-items-center font-bold text-lg">
+          {{ stats.pending_payouts }}
+        </div>
+      </div>
+    </a>
+
+    <!-- Reels Moderation -->
+    <a href="{{ url_for('admin_reels') }}" class="block bg-white border border-slate-200 rounded-2xl p-6 hover:shadow-md transition group">
+      <div class="flex justify-between items-start">
+        <div>
+          <div class="text-lg font-bold group-hover:text-blue-600 transition">Reels Moderation</div>
+          <p class="text-sm text-slate-500 mt-1">Approve promotional videos.</p>
+        </div>
+        <div class="w-12 h-12 rounded-full bg-slate-100 text-slate-400 grid place-items-center font-bold text-lg">🎬</div>
+      </div>
+    </a>
+    
+  </div>
+</div>
+{% endblock %}

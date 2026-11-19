@@ -4,9 +4,9 @@
 {% block content %}
 <div class="max-w-4xl mx-auto px-4 py-8">
   <div class="flex items-center justify-between mb-6">
-    <h1 class="text-3xl font-black">Vendor Withdrawals</h1>
-    <a href="{{ url_for('admin_applications') }}" class="text-sm text-amber-600 font-semibold hover:underline">← Back to Applications</a>
-  </div>
+  <h1 class="text-3xl font-black">Vendor Applications</h1>
+  <a href="{{ url_for('admin_dashboard') }}" class="text-sm text-slate-500 hover:underline">← Back to Dashboard</a>
+</div>
 
   {% with msgs = get_flashed_messages(with_categories=true) %}
     {% for cat, msg in msgs %}

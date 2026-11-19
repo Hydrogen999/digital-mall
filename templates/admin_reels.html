@@ -2,7 +2,10 @@
 {% block content %}
 <div class="max-w-6xl mx-auto px-4 py-8">
   <h1 class="text-3xl font-black mb-6">Promotional reels moderation</h1>
-
+<div class="flex items-center justify-between mb-6">
+  <h1 class="text-3xl font-black">Vendor Applications</h1>
+  <a href="{{ url_for('admin_dashboard') }}" class="text-sm text-slate-500 hover:underline">← Back to Dashboard</a>
+</div>
   <h2 class="text-lg font-bold mb-3">Pending approval ({{ pending|length }})</h2>
   <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
     {% for r in pending %}

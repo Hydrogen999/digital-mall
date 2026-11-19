@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Vendor applications · Admin{% endblock %}
 {% block content %}
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-3xl font-black">Vendor Applications</h1>
-    <div class="flex gap-4">
+ <div class="flex items-center justify-between mb-6">
+  <h1 class="text-3xl font-black">Vendor Applications</h1>
+  <a href="{{ url_for('admin_dashboard') }}" class="text-sm text-slate-500 hover:underline">← Back to Dashboard</a>
+</div>
       <a href="{{ url_for('admin_withdrawals') }}" class="text-sm text-emerald-600 font-semibold hover:underline">Manage Payouts →</a>
       <a href="{{ url_for('admin_reels') }}" class="text-sm text-amber-600 font-semibold hover:underline">Moderate Reels →</a>
     </div>

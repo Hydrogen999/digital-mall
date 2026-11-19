@@ -603,6 +603,46 @@ def admin_reject_withdrawal(wid):
     return redirect(url_for("admin_withdrawals"))
 
 # ==================================================================
+# ADMIN MASTER DASHBOARD
+# ==================================================================
+@app.route("/admin")
+@login_required
+def admin_dashboard():
+    if current_user.role != "admin": return redirect(url_for("home"))
+    
+    # 1. Calculate Platform Revenue
+    # Subscriptions: Count of all approved/active shops * 10,000
+    active_shops = Shop.query.filter(Shop.activation_paid == True).count()
+    sub_revenue = active_shops * ACTIVATION_FEE_NGN
+    
+    # Commissions: 5% of all Delivered items
+    delivered_items = OrderItem.query.filter_by(status="DELIVERED").all()
+    commission_revenue = sum((item.price * item.qty) * PLATFORM_COMMISSION for item in delivered_items)
+    
+    # 2. Pending Actions
+    pending_apps = Shop.query.filter_by(verification_status="PENDING_REVIEW").count()
+    pending_payouts = Withdrawal.query.filter_by(status="PENDING").count()
+    
+    # 3. General Stats
+    total_users = User.query.count()
+    total_orders = Order.query.count()
+    total_products = Product.query.count()
+    
+    stats = {
+        "sub_revenue": sub_revenue,
+        "commission_revenue": commission_revenue,
+        "total_revenue": sub_revenue + commission_revenue,
+        "pending_apps": pending_apps,
+        "pending_payouts": pending_payouts,
+        "total_users": total_users,
+        "total_orders": total_orders,
+        "total_products": total_products,
+        "active_shops": active_shops
+    }
+    
+    return render_template("admin_dashboard.html", stats=stats)
+
+# ==================================================================
 # ADMIN (Other)
 # ==================================================================
 @app.route("/admin/applications")

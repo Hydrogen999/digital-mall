@@ -1166,6 +1166,68 @@ def add_product():
     return redirect(url_for("dashboard"))
 
 
+@app.route("/vendor/product/edit/<int:pid>", methods=["POST"])
+@login_required
+def edit_product(pid):
+    shop = current_user.shop
+    product = Product.query.get_or_404(pid)
+    
+    # Security: Ensure the vendor actually owns this product
+    if not shop or product.shop_id != shop.id:
+        return "Forbidden", 403
+        
+    product.name = request.form.get("name")
+    product.description = request.form.get("description")
+    product.price = float(request.form.get("price", 0))
+    product.stock = int(request.form.get("stock", 0))
+    
+    # Only update image if a new one was uploaded
+    new_image = save_file(request.files.get("image"))
+    if new_image:
+        product.image = new_image
+        
+    db.session.commit()
+    flash("Product updated successfully.", "success")
+    return redirect(url_for("dashboard"))
+
+@app.route("/vendor/product/delete/<int:pid>", methods=["POST"])
+@login_required
+def delete_product(pid):
+    shop = current_user.shop
+    product = Product.query.get_or_404(pid)
+    
+    if not shop or product.shop_id != shop.id:
+        return "Forbidden", 403
+        
+    # Soft delete (hides from shop, but keeps order history intact)
+    product.is_active = False
+    db.session.commit()
+    flash("Product removed from your shop.", "success")
+    return redirect(url_for("dashboard"))
+
+@app.route("/vendor/shop/edit", methods=["POST"])
+@login_required
+def edit_shop():
+    shop = current_user.shop
+    if not shop:
+        return redirect(url_for("home"))
+        
+    shop.name = request.form.get("name")
+    shop.description = request.form.get("description")
+    shop.phone = normalize_phone(request.form.get("phone"))
+    shop.location = request.form.get("location")
+    
+    new_logo = save_file(request.files.get("logo"))
+    if new_logo: shop.logo = new_logo
+    
+    new_banner = save_file(request.files.get("banner"))
+    if new_banner: shop.banner = new_banner
+    
+    db.session.commit()
+    flash("Shop profile updated successfully!", "success")
+    return redirect(url_for("dashboard"))
+
+
 # ==================================================================
 # REEL PROMOTION
 # ==================================================================

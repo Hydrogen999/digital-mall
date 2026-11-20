@@ -38,6 +38,7 @@ from sockets import socketio
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ACTIVATION_FEE_NGN = 10000
 PLATFORM_COMMISSION = 0.05
+REEL_PROMO_FEE_NGN = 10000 # NEW: ₦10,000 to promote a reel
 
 PAYSTACK_SECRET_KEY = os.environ.get("PAYSTACK_SECRET_KEY", "sk_test_xxxx")
 
@@ -92,7 +93,6 @@ app.config.update(
     },
     MAX_CONTENT_LENGTH=16 * 1024 * 1024,
     
-    # EMAIL CONFIG
     MAIL_SERVER='smtp.gmail.com',
     MAIL_PORT=587,
     MAIL_USE_TLS=True,
@@ -130,14 +130,11 @@ def load_user(uid):
 
 ALLOWED_EXT = {"png", "jpg", "jpeg", "webp", "gif", "mp4", "webm", "mov"}
 
-# --- UPDATED SAVE_FILE FUNCTION ---
 def save_file(f):
     if not f or f.filename == "": return None
     ext = f.filename.rsplit(".", 1)[-1].lower()
     if ext not in ALLOWED_EXT: return None
-    
     try:
-        # Upload directly to Cloudinary
         upload_result = cloudinary.uploader.upload(f)
         return upload_result.get("secure_url")
     except Exception as e:
@@ -345,44 +342,52 @@ def cart():
 @app.route("/checkout", methods=["POST"])
 @login_required
 def checkout():
-    data  = request.get_json(silent=True) or {}
-    items = data.get("items", [])
-    if not items: return jsonify({"error": "Cart is empty"}), 400
+    try:
+        data  = request.get_json(silent=True) or {}
+        items = data.get("items", [])
+        if not items: return jsonify({"error": "Cart is empty"}), 400
 
-    total, lines = 0.0, []
-    for it in items:
-        p = Product.query.get(it.get("product_id"))
-        if not p or not p.is_active or not p.shop.is_approved:
-            return jsonify({"error": "A product in your cart is unavailable"}), 400
-        qty = max(1, int(it.get("qty", 1)))
-        if p.stock < qty:
-            return jsonify({"error": f"{p.name} is out of stock"}), 400
-        total += p.price * qty
-        lines.append((p, qty))
+        total, lines = 0.0, []
+        for it in items:
+            p = Product.query.get(it.get("product_id"))
+            if not p or not p.is_active or not p.shop.is_approved:
+                return jsonify({"error": "A product in your cart is unavailable"}), 400
+            qty = max(1, int(it.get("qty", 1)))
+            if p.stock < qty:
+                return jsonify({"error": f"{p.name} is out of stock"}), 400
+            total += p.price * qty
+            lines.append((p, qty))
 
-    order = Order(
-        customer_id=current_user.id, total=total,
-        reference="ORD-" + uuid.uuid4().hex[:8].upper(),
-        status="PENDING", 
-        address=data.get("address"), phone=data.get("phone"),
-    )
-    db.session.add(order); db.session.flush()
-    
-    for p, qty in lines:
-        db.session.add(OrderItem(
-            order_id=order.id, shop_id=p.shop_id, product_id=p.id,
-            name=p.name, price=p.price, qty=qty, status="PENDING"))
-        p.stock -= qty
-    db.session.commit()
+        order = Order(
+            customer_id=current_user.id, total=total,
+            reference="ORD-" + uuid.uuid4().hex[:8].upper(),
+            status="PENDING", 
+            address=data.get("address"), phone=data.get("phone"),
+        )
+        db.session.add(order); db.session.flush()
+        
+        for p, qty in lines:
+            db.session.add(OrderItem(
+                order_id=order.id, shop_id=p.shop_id, product_id=p.id,
+                name=p.name, price=p.price, qty=qty, status="PENDING"))
+            p.stock -= qty
+        db.session.commit()
 
-    callback_url = url_for('payment_success', reference=order.reference, _external=True)
-    auth_url = initialize_paystack(current_user.email, total, callback_url)
+        callback_url = url_for('payment_success', reference=order.reference, _external=True)
+        auth_url = initialize_paystack(current_user.email, total, callback_url)
 
-    if not auth_url:
-        flash("Could not connect to payment gateway. Try again.", "error")
-        return jsonify({"error": "Payment gateway error"}), 500
+        if not auth_url:
+            # Rollback the order if Paystack fails
+            db.session.delete(order)
+            db.session.commit()
+            return jsonify({"error": "Payment gateway error. Please try again."}), 500
 
-    return jsonify({"authorization_url": auth_url, "reference": order.reference})
+        return jsonify({"authorization_url": auth_url, "reference": order.reference})
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"CHECKOUT ERROR: {e}")
+        return jsonify({"error": "A server error occurred. Please try again."}), 500
 
 @app.route("/payment-success/<reference>")
 @login_required
@@ -428,9 +433,23 @@ def paystack_webhook():
 
     event = json.loads(request.data)
     if event.get('event') == 'charge.success':
-        reference = event['data']['reference']
-        order = Order.query.filter_by(reference=reference).first()
+        data = event['data']
+        reference = data['reference']
+        metadata = data.get('metadata', {})
         
+        # 1. Handle Reel Promotion Payment
+        if metadata.get("type") == "reel_promotion":
+            reel_id = metadata.get("reel_id")
+            reel = Reel.query.get(reel_id)
+            if reel:
+                reel.is_sponsored = True # Payment successful, now show as sponsored
+                # Note: We keep is_approved=False so Admin still needs to review the video
+                db.session.commit()
+                print(f"✅ Reel Promo Payment verified for Reel {reel_id}")
+            return '', 200
+
+        # 2. Handle Normal Product Order
+        order = Order.query.filter_by(reference=reference).first()
         if order and order.status == "PENDING":
             order.status = "PAID"
             for item in order.items:
@@ -453,7 +472,6 @@ def paystack_webhook():
                     <p><a href="https://your-render-url.onrender.com/dashboard">Click here to log in and mark it as shipped.</a></p>
                     """
                 )
-            
             print(f"✅ Payment verified for Order {reference}")
 
     return '', 200
@@ -555,11 +573,12 @@ def dashboard():
     products    = Product.query.filter_by(shop_id=shop.id).order_by(Product.created_at.desc()).all()
     convos      = Conversation.query.filter_by(shop_id=shop.id).order_by(Conversation.created_at.desc()).all()
     order_items = OrderItem.query.filter_by(shop_id=shop.id).order_by(OrderItem.id.desc()).all()
+    reels       = Reel.query.filter_by(shop_id=shop.id).order_by(Reel.created_at.desc()).all()
     
     days_left = max(0, (shop.subscription_expires_at - datetime.utcnow()).days) if shop.subscription_expires_at else 0
     total_sales = sum(i.price * i.qty for i in order_items if i.status in ["PAID", "SHIPPED", "DELIVERED"])
     
-    return render_template("dashboard.html", shop=shop, products=products, order_items=order_items, convos=convos, days_left=days_left, total_sales=total_sales)
+    return render_template("dashboard.html", shop=shop, products=products, order_items=order_items, convos=convos, reels=reels, days_left=days_left, total_sales=total_sales)
 
 @app.route("/vendor/ship/<int:item_id>", methods=["POST"])
 @login_required
@@ -585,6 +604,51 @@ def add_product():
     ))
     db.session.commit(); flash("Product added.", "success")
     return redirect(url_for("dashboard"))
+
+# ==================================================================
+# REEL PROMOTION (WITH PAYMENT)
+# ==================================================================
+@app.route("/dashboard/reel/upload", methods=["POST"])
+@login_required
+def upload_reel():
+    shop = current_user.shop
+    if not shop or shop.verification_status != "ACTIVE":
+        return jsonify({"error": "Shop must be active."}), 403
+
+    video = request.files.get("video")
+    if not video:
+        return jsonify({"error": "Video file is required."}), 400
+
+    video_url = save_file(video)
+    if not video_url:
+        return jsonify({"error": "Video upload failed."}), 500
+
+    # Create the Reel (unpaid for now)
+    reel = Reel(
+        shop_id=shop.id,
+        video_url=video_url,
+        poster_url=save_file(request.files.get("poster")),
+        caption=request.form.get("caption"),
+        product_id=request.form.get("product_id") or None,
+        is_sponsored=False, # Will turn True once paid
+        is_approved=False
+    )
+    db.session.add(reel)
+    db.session.commit()
+
+    # Initialize Paystack for ₦10,000
+    callback_url = url_for('dashboard', _external=True) # Return to dashboard after payment
+    auth_url = initialize_paystack(
+        current_user.email, 
+        REEL_PROMO_FEE_NGN, 
+        callback_url, 
+        metadata={"type": "reel_promotion", "reel_id": reel.id}
+    )
+
+    if not auth_url:
+        return jsonify({"error": "Payment gateway error."}), 500
+
+    return jsonify({"authorization_url": auth_url})
 
 # ==================================================================
 # WITHDRAWALS
@@ -676,10 +740,15 @@ def admin_dashboard():
     delivered_items = OrderItem.query.filter_by(status="DELIVERED").all()
     commission_revenue = sum((item.price * item.qty) * PLATFORM_COMMISSION for item in delivered_items)
     
+    # Reel Promo Revenue
+    paid_reels = Reel.query.filter_by(is_sponsored=True).count()
+    reel_revenue = paid_reels * REEL_PROMO_FEE_NGN
+
     stats = {
         "sub_revenue": sub_revenue,
         "commission_revenue": commission_revenue,
-        "total_revenue": sub_revenue + commission_revenue,
+        "reel_revenue": reel_revenue,
+        "total_revenue": sub_revenue + commission_revenue + reel_revenue,
         "pending_apps": Shop.query.filter_by(verification_status="PENDING_REVIEW").count(),
         "pending_payouts": Withdrawal.query.filter_by(status="PENDING").count(),
         "total_users": User.query.count(),

@@ -5,33 +5,39 @@
 <div class="max-w-7xl mx-auto px-4 py-6">
 
   <!-- ═══════════════ SUBSCRIPTION BANNER ═══════════════ -->
-  <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 flex justify-between items-center mb-6">
+  <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 flex justify-between items-center mb-6 shadow-sm">
     <div>
       <b>Subscription Status:</b> Active 
       <span class="text-sm ml-2">(Expires in <b>{{ days_left }} days</b>)</span>
     </div>
-    <a href="/vendor/pay-activation" class="text-sm font-bold bg-amber-500 text-white px-4 py-2 rounded-lg hover:bg-amber-600">
+    <a href="/vendor/pay-activation" class="text-sm font-bold bg-amber-500 text-white px-4 py-2 rounded-lg hover:bg-amber-600 transition">
       Renew Early (₦10,000)
     </a>
   </div>
 
   <!-- ═══════════════ STATS ═══════════════ -->
   <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-    <div class="bg-white p-4 rounded-2xl border border-slate-200">
-      <div class="text-xs text-slate-500">Wallet Balance</div>
-      <div class="text-2xl font-bold text-emerald-600">₦{{ "{:,.2f}".format(shop.wallet_balance) }}</div>
+    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm relative">
+      <div class="text-xs text-slate-500 font-medium">Wallet Balance</div>
+      <div class="text-2xl font-bold text-emerald-600 mt-1">₦{{ "{:,.2f}".format(shop.wallet_balance) }}</div>
+      {% if shop.wallet_balance > 0 %}
+        <button onclick="document.getElementById('withdraw-modal').showModal()" 
+                class="absolute bottom-4 right-4 text-xs bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg transition font-semibold">
+          Withdraw
+        </button>
+      {% endif %}
     </div>
-    <div class="bg-white p-4 rounded-2xl border border-slate-200">
-      <div class="text-xs text-slate-500">Total Sales</div>
-      <div class="text-2xl font-bold">₦{{ "{:,.2f}".format(total_sales) }}</div>
+    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+      <div class="text-xs text-slate-500 font-medium">Total Sales</div>
+      <div class="text-2xl font-bold text-slate-800 mt-1">₦{{ "{:,.2f}".format(total_sales) }}</div>
     </div>
-    <div class="bg-white p-4 rounded-2xl border border-slate-200">
-      <div class="text-xs text-slate-500">Shop Views</div>
-      <div class="text-2xl font-bold">{{ shop.views }}</div>
+    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+      <div class="text-xs text-slate-500 font-medium">Shop Views</div>
+      <div class="text-2xl font-bold text-slate-800 mt-1">{{ shop.views }}</div>
     </div>
-    <div class="bg-white p-4 rounded-2xl border border-slate-200">
-      <div class="text-xs text-slate-500">Orders</div>
-      <div class="text-2xl font-bold">{{ order_items|length }}</div>
+    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+      <div class="text-xs text-slate-500 font-medium">Orders</div>
+      <div class="text-2xl font-bold text-slate-800 mt-1">{{ order_items|length }}</div>
     </div>
   </div>
 
@@ -39,86 +45,135 @@
   <div class="grid lg:grid-cols-[240px,1fr] gap-6">
     
     <!-- SIDEBAR -->
-    <aside class="bg-white rounded-2xl border border-slate-200 p-3 h-fit">
+    <aside class="bg-white rounded-2xl border border-slate-200 p-3 h-fit sticky top-20 shadow-sm">
       <div class="flex items-center gap-3 p-2 mb-2 border-b border-slate-100">
-        {% if shop.logo %}<img src="{{ shop.logo }}" class="w-10 h-10 rounded-full object-cover">{% endif %}
+        {% if shop.logo %}<img src="{{ shop.logo }}" class="w-10 h-10 rounded-full object-cover border">{% endif %}
         <div>
-          <div class="font-bold text-sm">{{ shop.name }}</div>
-          <div class="text-xs text-slate-500">Approved</div>
+          <div class="font-bold text-sm truncate">{{ shop.name }}</div>
+          <div class="text-xs text-emerald-600 font-semibold">Approved</div>
         </div>
       </div>
-      <button data-tab="products" class="tab-btn w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-50 font-medium">Products</button>
-      <button data-tab="orders" class="tab-btn w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-50 font-medium">Orders</button>
-      <button data-tab="messages" class="tab-btn w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-slate-50 font-medium">Messages</button>
+      <button data-tab="products" class="tab-btn w-full text-left px-3 py-2.5 rounded-lg text-sm hover:bg-slate-50 font-medium transition">Products</button>
+      <button data-tab="orders" class="tab-btn w-full text-left px-3 py-2.5 rounded-lg text-sm hover:bg-slate-50 font-medium transition">Orders</button>
+      <button data-tab="messages" class="tab-btn w-full text-left px-3 py-2.5 rounded-lg text-sm hover:bg-slate-50 font-medium transition">Messages</button>
+      <button data-tab="reels" class="tab-btn w-full text-left px-3 py-2.5 rounded-lg text-sm hover:bg-slate-50 font-medium transition text-amber-600 font-semibold">Promote Reels</button>
     </aside>
 
     <!-- PANELS -->
     <section class="space-y-6">
       
-      <!-- PRODUCTS -->
-      <div data-panel="products" class="panel bg-white rounded-2xl border border-slate-200 p-5">
+      <!-- 1. PRODUCTS -->
+      <div data-panel="products" class="panel bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-lg font-bold">Products</h2>
-          <button onclick="document.getElementById('add-prod').showModal()" class="px-4 py-2 rounded-lg bg-amber-500 text-white text-sm font-semibold">+ Add Product</button>
+          <button onclick="document.getElementById('add-prod').showModal()" class="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold transition">+ Add Product</button>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
           {% for p in products %}
-            <div class="border rounded-xl overflow-hidden">
-              <div class="aspect-square bg-slate-100">
-                {% if p.image %}<img src="{{ p.image }}" class="w-full h-full object-cover">{% endif %}
+            <div class="border rounded-xl overflow-hidden group">
+              <div class="aspect-square bg-slate-100 relative">
+                {% if p.image %}<img src="{{ p.image }}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300">{% endif %}
               </div>
-              <div class="p-2 text-sm">
+              <div class="p-3 text-sm">
                 <div class="font-semibold truncate">{{ p.name }}</div>
-                <div class="text-amber-600">₦{{ "{:,.2f}".format(p.price) }}</div>
-                <div class="text-xs text-slate-500">Stock: {{ p.stock }} · Views: {{ p.views }}</div>
+                <div class="text-amber-600 font-bold mt-1">₦{{ "{:,.2f}".format(p.price) }}</div>
+                <div class="text-xs text-slate-500 mt-1">Stock: {{ p.stock }} · Views: {{ p.views }}</div>
               </div>
             </div>
           {% endfor %}
+          {% if not products %}
+            <p class="text-sm text-slate-400 py-4 col-span-4 text-center">No products added yet.</p>
+          {% endif %}
         </div>
       </div>
 
-      <!-- ORDERS -->
-      <div data-panel="orders" class="panel hidden bg-white rounded-2xl border border-slate-200 p-5">
+      <!-- 2. ORDERS -->
+      <div data-panel="orders" class="panel hidden bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
         <h2 class="text-lg font-bold mb-4">Orders</h2>
-        <table class="w-full text-sm">
-          <thead class="text-left text-slate-500 border-b">
-            <tr><th class="py-2">Item</th><th>Qty</th><th>Status</th><th>Action</th></tr>
-          </thead>
-          <tbody>
-            {% for i in order_items %}
-              <tr class="border-b last:border-0">
-                <td class="py-2">{{ i.name }}</td>
-                <td>{{ i.qty }}</td>
-                <td>
-                  <span class="px-2 py-1 text-xs rounded-full font-bold
-                    {{ 'bg-blue-100 text-blue-700' if i.status=='PAID' else 'bg-amber-100 text-amber-700' if i.status=='SHIPPED' else 'bg-green-100 text-green-700' }}">
-                    {{ i.status }}
-                  </span>
-                </td>
-                <td>
-                  {% if i.status == 'PAID' %}
-                    <form method="POST" action="/vendor/ship/{{ i.id }}">
-                      <button class="text-xs bg-slate-800 text-white px-2 py-1 rounded">Mark Shipped</button>
-                    </form>
-                  {% endif %}
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="text-left text-slate-500 border-b">
+              <tr><th class="py-3 px-2">Item</th><th class="px-2">Qty</th><th class="px-2">Status</th><th class="px-2 text-right">Action</th></tr>
+            </thead>
+            <tbody>
+              {% for i in order_items %}
+                <tr class="border-b last:border-0 hover:bg-slate-50 transition">
+                  <td class="py-3 px-2 font-medium">{{ i.name }}</td>
+                  <td class="px-2">{{ i.qty }}</td>
+                  <td class="px-2">
+                    <span class="px-2 py-1 text-[10px] uppercase tracking-wide rounded-full font-bold
+                      {{ 'bg-blue-100 text-blue-700' if i.status=='PAID' else 'bg-amber-100 text-amber-700' if i.status=='SHIPPED' else 'bg-green-100 text-green-700' }}">
+                      {{ i.status }}
+                    </span>
+                  </td>
+                  <td class="px-2 text-right">
+                    {% if i.status == 'PAID' %}
+                      <form method="POST" action="/vendor/ship/{{ i.id }}">
+                        <button class="text-xs bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded-lg transition">Mark Shipped</button>
+                      </form>
+                    {% elif i.status == 'SHIPPED' %}
+                      <span class="text-xs text-slate-400">Awaiting Delivery</span>
+                    {% else %}
+                      <span class="text-xs text-emerald-600 font-semibold">Completed</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+              {% if not order_items %}
+                <tr><td colspan="4" class="py-6 text-center text-slate-400">No orders yet.</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      <!-- MESSAGES -->
-      <div data-panel="messages" class="panel hidden bg-white rounded-2xl border border-slate-200 p-5">
-        <h2 class="text-lg font-bold mb-4">Messages</h2>
+      <!-- 3. MESSAGES -->
+      <div data-panel="messages" class="panel hidden bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+        <h2 class="text-lg font-bold mb-4">Customer Messages</h2>
         <div class="divide-y">
           {% for c in convos %}
-            <a href="/chat/{{ shop.slug }}?customer={{ c.customer_id }}" class="flex justify-between py-3 hover:bg-slate-50 px-2 rounded">
-              <div class="font-medium">Customer #{{ c.customer_id }}</div>
+            <a href="/chat/{{ shop.slug }}?customer={{ c.customer_id }}" class="flex justify-between items-center py-3 hover:bg-slate-50 px-2 rounded transition">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-full bg-slate-200 grid place-items-center font-bold text-slate-500">C</div>
+                <div class="font-medium">Customer #{{ c.customer_id }}</div>
+              </div>
               <span class="text-xs text-slate-400">{{ c.created_at.strftime("%d %b") }}</span>
             </a>
           {% endfor %}
-          {% if not convos %}<p class="text-sm text-slate-400 py-4">No messages yet.</p>{% endif %}
+          {% if not convos %}<p class="text-sm text-slate-400 py-4 text-center">No messages yet.</p>{% endif %}
+        </div>
+      </div>
+
+      <!-- 4. REELS (PROMOTIONS) -->
+      <div data-panel="reels" class="panel hidden bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-lg font-bold">Promotional Reels</h2>
+            <p class="text-xs text-slate-500 mt-1">Upload a video to show on the main feed. Requires a ₦10,000 promotion fee.</p>
+          </div>
+          <button onclick="document.getElementById('new-reel').showModal()" class="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold transition">
+            + Promote Video
+          </button>
+        </div>
+        
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {% for r in reels %}
+            <div class="border rounded-xl overflow-hidden">
+              <video src="{{ r.video_url }}" poster="{{ r.poster_url }}" class="w-full aspect-[9/16] object-cover" muted controls></video>
+              <div class="p-2 text-xs">
+                <span class="{{ 'bg-green-100 text-green-700' if r.is_approved else 'bg-amber-100 text-amber-700' }} px-2 py-0.5 rounded-full font-semibold">
+                  {{ "Approved" if r.is_approved else "Pending Review" }}
+                </span>
+                <div class="mt-1.5 text-slate-500 font-medium">{{ r.views }} views · {{ r.likes }} likes</div>
+              </div>
+            </div>
+          {% endfor %}
+          {% if not reels %}
+            <div class="col-span-4 text-center py-10">
+              <div class="text-4xl mb-2">🎬</div>
+              <p class="text-sm text-slate-400">No reels yet. Promote your first video!</p>
+            </div>
+          {% endif %}
         </div>
       </div>
 
@@ -127,19 +182,68 @@
 </div>
 
 <!-- ═══════════════ MODALS ═══════════════ -->
-<dialog id="add-prod" class="rounded-2xl p-6 w-full max-w-md backdrop:bg-black/40">
-  <form method="POST" action="/vendor/product/add" enctype="multipart/form-data" class="space-y-3">
-    <h3 class="text-lg font-bold">Add a product</h3>
-    <input name="name" required placeholder="Product name" class="w-full px-3 py-2 border rounded-lg">
-    <textarea name="description" placeholder="Description" class="w-full px-3 py-2 border rounded-lg" rows="3"></textarea>
+
+<!-- Add Product Modal -->
+<dialog id="add-prod" class="rounded-2xl p-6 w-full max-w-md backdrop:bg-black/50 shadow-2xl">
+  <form method="POST" action="/vendor/product/add" enctype="multipart/form-data" class="space-y-4">
+    <h3 class="text-xl font-black">Add a product</h3>
+    <input name="name" required placeholder="Product name" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
+    <textarea name="description" placeholder="Description" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none" rows="3"></textarea>
     <div class="grid grid-cols-2 gap-2">
-      <input name="price" type="number" step="0.01" required placeholder="Price (₦)" class="px-3 py-2 border rounded-lg">
-      <input name="stock" type="number" placeholder="Stock" class="px-3 py-2 border rounded-lg">
+      <input name="price" type="number" step="0.01" required placeholder="Price (₦)" class="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
+      <input name="stock" type="number" placeholder="Stock" class="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
     </div>
-    <input name="image" type="file" accept="image/*" class="text-sm">
-    <div class="flex justify-end gap-2 pt-2">
-      <button type="button" onclick="this.closest('dialog').close()" class="px-3 py-2 text-sm">Cancel</button>
-      <button class="px-4 py-2 bg-amber-500 text-white rounded-lg text-sm font-semibold">Save</button>
+    <input name="image" type="file" accept="image/*" class="text-sm block w-full text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100">
+    <div class="flex justify-end gap-2 pt-2 border-t mt-2">
+      <button type="button" onclick="this.closest('dialog').close()" class="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">Cancel</button>
+      <button class="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-bold shadow-lg">Save Product</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Promote Reel Modal (Paystack Integrated) -->
+<dialog id="new-reel" class="rounded-2xl p-6 w-full max-w-md backdrop:bg-black/50 shadow-2xl">
+  <form id="reel-form" enctype="multipart/form-data" class="space-y-4">
+    <div>
+      <h3 class="text-xl font-black">Promote a Video</h3>
+      <p class="text-xs text-slate-500 mt-1">Upload a video to appear on the Reels feed. You will be charged <b>₦10,000</b> to unlock this promotion.</p>
+    </div>
+    
+    <div>
+      <label class="text-sm font-semibold text-slate-700">Video File (MP4)</label>
+      <input name="video" type="file" accept="video/mp4,video/webm" required class="mt-1 block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100">
+    </div>
+    
+    <div>
+      <label class="text-sm font-semibold text-slate-700">Cover Image (Optional)</label>
+      <input name="poster" type="file" accept="image/*" class="mt-1 block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-slate-50 file:text-slate-700 hover:file:bg-slate-100">
+    </div>
+    
+    <textarea name="caption" placeholder="Caption (e.g. New watch collection just landed)" rows="2" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none"></textarea>
+    
+    <div class="flex justify-end gap-2 pt-2 border-t mt-2">
+      <button type="button" onclick="this.closest('dialog').close()" class="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">Cancel</button>
+      <button type="submit" id="reel-submit-btn" class="px-5 py-2 bg-slate-900 hover:bg-black text-white rounded-lg text-sm font-bold shadow-lg transition flex items-center gap-2">
+        Pay ₦10,000 & Submit
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Withdraw Modal -->
+<dialog id="withdraw-modal" class="rounded-2xl p-6 w-full max-w-md backdrop:bg-black/50 shadow-2xl">
+  <form method="POST" action="/vendor/withdraw" class="space-y-4">
+    <h3 class="text-xl font-black">Withdraw Funds</h3>
+    <p class="text-sm text-slate-500 mb-2">Available Balance: <b class="text-emerald-600">₦{{ "{:,.2f}".format(shop.wallet_balance) }}</b></p>
+    
+    <input name="amount" type="number" step="0.01" max="{{ shop.wallet_balance }}" required placeholder="Amount to withdraw (₦)" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-400 outline-none">
+    <input name="bank_name" required placeholder="Bank Name (e.g. GTBank)" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-400 outline-none">
+    <input name="account_number" required placeholder="Account Number" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-400 outline-none">
+    <input name="account_name" required placeholder="Account Name" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-400 outline-none">
+    
+    <div class="flex justify-end gap-2 pt-2 border-t mt-2">
+      <button type="button" onclick="this.closest('dialog').close()" class="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">Cancel</button>
+      <button class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-bold shadow-lg">Request Payout</button>
     </div>
   </form>
 </dialog>
@@ -148,14 +252,58 @@
 
 {% block scripts %}
 <script>
+  // 1. Handle Tab Switching
   document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".panel").forEach(p => p.classList.add("hidden"));
       document.querySelector(`[data-panel="${btn.dataset.tab}"]`).classList.remove("hidden");
-      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("bg-slate-100"));
-      btn.classList.add("bg-slate-100");
+      document.querySelectorAll(".tab-btn").forEach(b => {
+        b.classList.remove("bg-slate-100", "font-bold");
+        b.classList.add("text-slate-600");
+      });
+      btn.classList.add("bg-slate-100", "font-bold");
+      btn.classList.remove("text-slate-600");
     });
   });
+  
+  // Default to the first tab
   document.querySelector(".tab-btn")?.click();
+
+  // 2. Handle Reel Upload with Paystack
+  const reelForm = document.getElementById("reel-form");
+  if (reelForm) {
+    reelForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById("reel-submit-btn");
+      const originalText = btn.innerHTML;
+      
+      btn.innerHTML = "Processing...";
+      btn.disabled = true;
+
+      const formData = new FormData(reelForm);
+      
+      try {
+        const res = await fetch("/dashboard/reel/upload", {
+          method: "POST",
+          body: formData
+        });
+        
+        const data = await res.json();
+        
+        if (res.ok && data.authorization_url) {
+          // Redirect to Paystack Checkout
+          window.location.href = data.authorization_url;
+        } else {
+          alert(data.error || "Upload failed. Please check your video file.");
+          btn.innerHTML = originalText;
+          btn.disabled = false;
+        }
+      } catch (err) {
+        alert("Network error. Please try again.");
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+      }
+    });
+  }
 </script>
 {% endblock %}

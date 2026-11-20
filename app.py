@@ -5,6 +5,8 @@ import uuid
 import hmac
 import hashlib
 import requests
+import cloudinary
+import cloudinary.uploader
 from datetime import datetime, timedelta
 from sqlalchemy.pool import NullPool
 
@@ -14,6 +16,7 @@ from flask import (
 from flask_login import (
     LoginManager, login_user, login_required, logout_user, current_user,
 )
+from flask_mail import Mail, Message as MailMessage
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 
@@ -34,9 +37,17 @@ from sockets import socketio
 # ==================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ACTIVATION_FEE_NGN = 10000
-PLATFORM_COMMISSION = 0.05 # 5% platform cut
+PLATFORM_COMMISSION = 0.05
 
 PAYSTACK_SECRET_KEY = os.environ.get("PAYSTACK_SECRET_KEY", "sk_test_xxxx")
+
+# Setup Cloudinary
+cloudinary.config(
+    cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.environ.get("CLOUDINARY_API_KEY"),
+    api_secret=os.environ.get("CLOUDINARY_API_SECRET"),
+    secure=True
+)
 
 def slugify(text: str) -> str:
     text = re.sub(r"[^\w\s-]", "", (text or "").lower())
@@ -68,6 +79,72 @@ def run_application_checks(form, files) -> dict:
     return {"blocking": blocking, "warnings": warnings}
 
 # ==================================================================
+# APP SETUP & EMAIL
+# ==================================================================
+app = Flask(__name__)
+app.config.update(
+    SECRET_KEY=os.environ.get("SECRET_KEY", "dev-change-me-please"),
+    SQLALCHEMY_DATABASE_URI=os.environ.get("DATABASE_URL", "sqlite:///mall.db"),
+    SQLALCHEMY_TRACK_MODIFICATIONS=False,
+    SQLALCHEMY_ENGINE_OPTIONS={
+        "poolclass": NullPool,
+        "pool_pre_ping": True,
+    },
+    MAX_CONTENT_LENGTH=16 * 1024 * 1024,
+    
+    # EMAIL CONFIG
+    MAIL_SERVER='smtp.gmail.com',
+    MAIL_PORT=587,
+    MAIL_USE_TLS=True,
+    MAIL_USERNAME=os.environ.get('MAIL_USERNAME'),
+    MAIL_PASSWORD=os.environ.get('MAIL_PASSWORD'),
+    MAIL_DEFAULT_SENDER=os.environ.get('MAIL_USERNAME')
+)
+
+db.init_app(app)
+socketio.init_app(app)
+mail = Mail(app)
+
+def send_email(to_email, subject, html_body):
+    if not app.config['MAIL_USERNAME']: return 
+    try:
+        msg = MailMessage(subject, recipients=[to_email])
+        msg.html = html_body
+        mail.send(msg)
+    except Exception as e:
+        print(f"❌ Email failed to send: {e}")
+
+@app.template_filter("from_json")
+def from_json_filter(value):
+    try: return json.loads(value or "[]")
+    except Exception: return []
+
+login_manager = LoginManager(app)
+login_manager.login_view = "login"
+login_manager.login_message = "Please sign in to continue."
+login_manager.login_message_category = "error"
+
+@login_manager.user_loader
+def load_user(uid):
+    return User.query.get(int(uid))
+
+ALLOWED_EXT = {"png", "jpg", "jpeg", "webp", "gif", "mp4", "webm", "mov"}
+
+# --- UPDATED SAVE_FILE FUNCTION ---
+def save_file(f):
+    if not f or f.filename == "": return None
+    ext = f.filename.rsplit(".", 1)[-1].lower()
+    if ext not in ALLOWED_EXT: return None
+    
+    try:
+        # Upload directly to Cloudinary
+        upload_result = cloudinary.uploader.upload(f)
+        return upload_result.get("secure_url")
+    except Exception as e:
+        print(f"Cloudinary Upload Error: {e}")
+        return None
+
+# ==================================================================
 # PAYSTACK HELPER
 # ==================================================================
 def initialize_paystack(email, amount_ngn, callback_url, metadata=None):
@@ -86,50 +163,6 @@ def initialize_paystack(email, amount_ngn, callback_url, metadata=None):
     if response.status_code == 200:
         return response.json()["data"]["authorization_url"]
     return None
-
-# ==================================================================
-# APP SETUP
-# ==================================================================
-app = Flask(__name__)
-app.config.update(
-    SECRET_KEY=os.environ.get("SECRET_KEY", "dev-change-me-please"),
-    SQLALCHEMY_DATABASE_URI=os.environ.get("DATABASE_URL", "sqlite:///mall.db"),
-    SQLALCHEMY_TRACK_MODIFICATIONS=False,
-    SQLALCHEMY_ENGINE_OPTIONS={
-        "poolclass": NullPool,
-        "pool_pre_ping": True,
-    },
-    UPLOAD_FOLDER=os.path.join(BASE_DIR, "static", "uploads"),
-    MAX_CONTENT_LENGTH=16 * 1024 * 1024,
-)
-os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
-
-db.init_app(app)
-socketio.init_app(app)
-
-@app.template_filter("from_json")
-def from_json_filter(value):
-    try: return json.loads(value or "[]")
-    except Exception: return []
-
-login_manager = LoginManager(app)
-login_manager.login_view = "login"
-login_manager.login_message = "Please sign in to continue."
-login_manager.login_message_category = "error"
-
-@login_manager.user_loader
-def load_user(uid):
-    return User.query.get(int(uid))
-
-ALLOWED_EXT = {"png", "jpg", "jpeg", "webp", "gif", "mp4", "webm", "mov"}
-
-def save_file(f):
-    if not f or f.filename == "": return None
-    ext = f.filename.rsplit(".", 1)[-1].lower()
-    if ext not in ALLOWED_EXT: return None
-    name = secure_filename(f"{uuid.uuid4().hex}.{ext}")
-    f.save(os.path.join(app.config["UPLOAD_FOLDER"], name))
-    return f"/static/uploads/{name}"
 
 # ==================================================================
 # AUTO-EXPIRY SYSTEM
@@ -303,7 +336,7 @@ def chat(slug):
     return render_template("chat.html", conv=conv, shop=shop)
 
 # ==================================================================
-# CART & CHECKOUT (PAYSTACK INTEGRATED)
+# CART & CHECKOUT
 # ==================================================================
 @app.route("/cart")
 def cart():
@@ -403,6 +436,24 @@ def paystack_webhook():
             for item in order.items:
                 item.status = "PAID"
             db.session.commit()
+            
+            shops_in_order = {item.shop for item in order.items}
+            for shop in shops_in_order:
+                vendor_email = shop.owner.email
+                send_email(
+                    vendor_email,
+                    f"🛒 New Order #{order.reference} - {shop.name}",
+                    f"""
+                    <h2>You have a new order!</h2>
+                    <p>Hi {shop.name},</p>
+                    <p>Order <b>#{order.reference}</b> has been paid for by {order.customer.username}.</p>
+                    <p><b>Delivery Address:</b> {order.address}</p>
+                    <p><b>Phone:</b> {order.phone}</p>
+                    <br>
+                    <p><a href="https://your-render-url.onrender.com/dashboard">Click here to log in and mark it as shipped.</a></p>
+                    """
+                )
+            
             print(f"✅ Payment verified for Order {reference}")
 
     return '', 200
@@ -536,7 +587,7 @@ def add_product():
     return redirect(url_for("dashboard"))
 
 # ==================================================================
-# WITHDRAWALS (VENDOR & ADMIN)
+# WITHDRAWALS
 # ==================================================================
 @app.route("/vendor/withdraw", methods=["POST"])
 @login_required
@@ -558,11 +609,7 @@ def vendor_withdraw():
         return redirect(url_for("dashboard"))
 
     shop.wallet_balance -= amount
-    
-    withdrawal = Withdrawal(
-        shop_id=shop.id, amount=amount, 
-        bank_name=bank_name, account_name=acc_name, account_number=acc_num
-    )
+    withdrawal = Withdrawal(shop_id=shop.id, amount=amount, bank_name=bank_name, account_name=acc_name, account_number=acc_num)
     db.session.add(withdrawal)
     db.session.commit()
     
@@ -586,6 +633,20 @@ def admin_approve_withdrawal(wid):
         w.status = "PAID"
         w.processed_at = datetime.utcnow()
         db.session.commit()
+        
+        send_email(
+            w.shop.owner.email,
+            f"💰 Payout Processed - ₦{w.amount:,.2f}",
+            f"""
+            <h2>Good news!</h2>
+            <p>Hi {w.shop.name},</p>
+            <p>Your withdrawal request of <b>₦{w.amount:,.2f}</b> has been successfully processed and sent to your bank account:</p>
+            <p><b>Bank:</b> {w.bank_name}<br>
+            <b>Account:</b> {w.account_number}</p>
+            <p>Thank you for doing business with us!</p>
+            """
+        )
+        
         flash("Withdrawal marked as Paid.", "success")
     return redirect(url_for("admin_withdrawals"))
 
@@ -597,54 +658,37 @@ def admin_reject_withdrawal(wid):
     if w.status == "PENDING":
         w.status = "REJECTED"
         w.processed_at = datetime.utcnow()
-        w.shop.wallet_balance += w.amount # Refund
+        w.shop.wallet_balance += w.amount
         db.session.commit()
         flash("Withdrawal rejected and funds returned to vendor.", "success")
     return redirect(url_for("admin_withdrawals"))
 
 # ==================================================================
-# ADMIN MASTER DASHBOARD
+# ADMIN MASTER DASHBOARD & OTHERS
 # ==================================================================
 @app.route("/admin")
 @login_required
 def admin_dashboard():
     if current_user.role != "admin": return redirect(url_for("home"))
     
-    # 1. Calculate Platform Revenue
-    # Subscriptions: Count of all approved/active shops * 10,000
     active_shops = Shop.query.filter(Shop.activation_paid == True).count()
     sub_revenue = active_shops * ACTIVATION_FEE_NGN
-    
-    # Commissions: 5% of all Delivered items
     delivered_items = OrderItem.query.filter_by(status="DELIVERED").all()
     commission_revenue = sum((item.price * item.qty) * PLATFORM_COMMISSION for item in delivered_items)
-    
-    # 2. Pending Actions
-    pending_apps = Shop.query.filter_by(verification_status="PENDING_REVIEW").count()
-    pending_payouts = Withdrawal.query.filter_by(status="PENDING").count()
-    
-    # 3. General Stats
-    total_users = User.query.count()
-    total_orders = Order.query.count()
-    total_products = Product.query.count()
     
     stats = {
         "sub_revenue": sub_revenue,
         "commission_revenue": commission_revenue,
         "total_revenue": sub_revenue + commission_revenue,
-        "pending_apps": pending_apps,
-        "pending_payouts": pending_payouts,
-        "total_users": total_users,
-        "total_orders": total_orders,
-        "total_products": total_products,
+        "pending_apps": Shop.query.filter_by(verification_status="PENDING_REVIEW").count(),
+        "pending_payouts": Withdrawal.query.filter_by(status="PENDING").count(),
+        "total_users": User.query.count(),
+        "total_orders": Order.query.count(),
+        "total_products": Product.query.count(),
         "active_shops": active_shops
     }
-    
     return render_template("admin_dashboard.html", stats=stats)
 
-# ==================================================================
-# ADMIN (Other)
-# ==================================================================
 @app.route("/admin/applications")
 @login_required
 def admin_applications():
@@ -662,7 +706,22 @@ def admin_approve(sid):
     shop = Shop.query.get_or_404(sid)
     shop.verification_status = "APPROVED"
     shop.reviewed_at = datetime.utcnow()
-    db.session.commit(); flash(f"{shop.name} approved.", "success")
+    db.session.commit()
+    
+    send_email(
+        shop.owner.email,
+        "🎉 Your Mall Application is Approved!",
+        f"""
+        <h2>Welcome to the Mall!</h2>
+        <p>Hi {shop.owner.username},</p>
+        <p>Your shop <b>{shop.name}</b> has been reviewed and approved.</p>
+        <p>To start selling, please log in and pay the one-time activation fee of ₦10,000 to make your shop live.</p>
+        <br>
+        <p><a href="https://your-render-url.onrender.com/dashboard">Click here to log in and activate your shop.</a></p>
+        """
+    )
+    
+    flash(f"{shop.name} approved.", "success")
     return redirect(url_for("admin_applications"))
 
 @app.route("/admin/applications/<int:sid>/reject", methods=["POST"])
@@ -673,7 +732,21 @@ def admin_reject(sid):
     shop.verification_status = "REJECTED"
     shop.rejection_reason = request.form.get("reason", "Invalid details.")
     shop.reviewed_at = datetime.utcnow()
-    db.session.commit(); flash("Shop rejected.", "success")
+    db.session.commit()
+    
+    send_email(
+        shop.owner.email,
+        "Update on your Mall Application",
+        f"""
+        <h2>Application Status Update</h2>
+        <p>Hi {shop.owner.username},</p>
+        <p>Unfortunately, your application for <b>{shop.name}</b> was not approved at this time.</p>
+        <p><b>Reason:</b> {shop.rejection_reason}</p>
+        <p>You can log in to review this and submit a new application if you wish.</p>
+        """
+    )
+    
+    flash("Shop rejected.", "success")
     return redirect(url_for("admin_applications"))
 
 @app.route("/admin/reels")
@@ -729,4 +802,4 @@ with app.app_context():
     db.create_all()
 
 if __name__ == "__main__":
-    socketio.run(app, debug=True, host="0.0.0.0", port=5000, allow_unsafe_werkzeug=True)
+    socketio.run(app, debug=True, host="0.0.0.0", port=5000, allow_unsafe_werkzeug=True)s

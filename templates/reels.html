@@ -46,7 +46,7 @@
   {% endif %}
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
   // Autoplay the visible reel only
   const videos = document.querySelectorAll("#feed video");
   const io = new IntersectionObserver(entries => {

@@ -1,24 +1,33 @@
+import hashlib
+import hmac
+import json
+import logging
 import os
 import re
-import json
+import secrets
+import time
 import uuid
-import hmac
-import hashlib
-import requests
+from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
+from functools import wraps
+from urllib.parse import quote
+
+import click
 import cloudinary
 import cloudinary.uploader
-from datetime import datetime, timedelta
-from sqlalchemy.pool import NullPool
-
+import cloudinary.utils
+import requests
 from flask import (
-    Flask, render_template, request, redirect, url_for, jsonify, flash,
+    Flask, abort, flash, g, jsonify, redirect, render_template, request, session, url_for,
 )
 from flask_login import (
-    LoginManager, login_user, login_required, logout_user, current_user,
+    LoginManager, current_user, login_required, login_user, logout_user,
 )
 from flask_mail import Mail, Message as MailMessage
-from werkzeug.security import generate_password_hash, check_password_hash
-from werkzeug.utils import secure_filename
+from markupsafe import escape
+from sqlalchemy.pool import NullPool
+from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.security import check_password_hash, generate_password_hash
 
 try:
     from dotenv import load_dotenv
@@ -27,266 +36,693 @@ except ImportError:
     pass
 
 from models import (
-    db, User, Shop, Product, Conversation, Message,
-    Order, OrderItem, Review, Reel, Wishlist, Withdrawal
+    Conversation, Order, OrderItem, Product, Reel, ReelLike, Review,
+    Shop, User, Wishlist, Withdrawal, db,
+)
+from security import (
+    apply_security_headers, client_ip, csrf_protect, csrf_token, limiter,
+    new_csp_nonce, rate_limit, safe_http_url, safe_next_url, sanitize_upload,
 )
 from sockets import socketio
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("mall")
+audit_log = logging.getLogger("mall.audit")
+
 # ==================================================================
-# CONFIG & HELPERS
+# CONFIG
 # ==================================================================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Secure by default: anything that is not explicitly "development" is production.
+APP_ENV = os.environ.get("APP_ENV", "production").lower()
+IS_PROD = APP_ENV != "development"
+CSP_MODE = os.environ.get("CSP_MODE", "report-only").lower()  # set to "enforce" once verified in a browser
+
 ACTIVATION_FEE_NGN = 10000
 PLATFORM_COMMISSION = 0.05
-REEL_PROMO_FEE_NGN = 10000 # NEW: ₦10,000 to promote a reel
+REEL_PROMO_FEE_NGN = 10000
+PENDING_ORDER_TTL = timedelta(hours=2)
 
-PAYSTACK_SECRET_KEY = os.environ.get("PAYSTACK_SECRET_KEY", "sk_test_xxxx")
 
-# Setup Cloudinary
+def _secret(name: str, min_len: int, dev_default: str, banned=()) -> str:
+    val = os.environ.get(name, "")
+    if IS_PROD:
+        if len(val) < min_len or val in banned:
+            raise RuntimeError(
+                f"{name} is missing or too weak. Set a strong value in your environment "
+                f"(at least {min_len} characters). Refusing to start in production."
+            )
+        return val
+    return val or dev_default
+
+
+SECRET_KEY = _secret("SECRET_KEY", 32, secrets.token_hex(32), banned=("dev-change-me-please",))
+PAYSTACK_SECRET_KEY = _secret("PAYSTACK_SECRET_KEY", 10, "sk_test_dev_only", banned=("sk_test_xxxx",))
+
 cloudinary.config(
     cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME"),
     api_key=os.environ.get("CLOUDINARY_API_KEY"),
     api_secret=os.environ.get("CLOUDINARY_API_SECRET"),
-    secure=True
+    secure=True,
 )
 
-def slugify(text: str) -> str:
-    text = re.sub(r"[^\w\s-]", "", (text or "").lower())
-    return re.sub(r"[-\s]+", "-", text).strip("-") or "shop"
-
-def normalize_phone(raw: str) -> str:
-    digits = re.sub(r"\D", "", raw or "")
-    if digits.startswith("234"): return "+" + digits
-    if digits.startswith("0") and len(digits) == 11: return "+234" + digits[1:]
-    return digits
-
-def is_valid_ng_phone(raw: str) -> bool:
-    digits = re.sub(r"\D", "", raw or "")
-    return bool(re.match(r"^(234|0)[789][01]\d{8}$", digits))
-
-def run_application_checks(form, files) -> dict:
-    blocking, warnings = [], []
-    name = (form.get("name") or "").strip()
-    phone = form.get("phone", "")
-    seller_type = form.get("seller_type", "business")
-    cac = (form.get("cac_number") or "").strip()
-    
-    if len(name) < 3: blocking.append("Business name must be at least 3 characters.")
-    if not is_valid_ng_phone(phone): blocking.append("Phone number must be a valid Nigerian number.")
-    if seller_type == "business" and len(cac) < 4: blocking.append("Registered businesses must provide a CAC / RC number.")
-    if Shop.query.filter(Shop.name.ilike(name)).first(): blocking.append("A shop with this name already exists.")
-    if not files.get("id_image") or files.get("id_image").filename == "": blocking.append("Please upload a photo of your government ID.")
-    
-    return {"blocking": blocking, "warnings": warnings}
+db_url = os.environ.get("DATABASE_URL", "sqlite:///mall.db")
+if db_url.startswith("postgres://"):  # old Heroku-style scheme rejected by SQLAlchemy 2
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
 
 # ==================================================================
-# APP SETUP & EMAIL
+# APP SETUP
 # ==================================================================
 app = Flask(__name__)
 app.config.update(
-    SECRET_KEY=os.environ.get("SECRET_KEY", "dev-change-me-please"),
-    SQLALCHEMY_DATABASE_URI=os.environ.get("DATABASE_URL", "sqlite:///mall.db"),
+    SECRET_KEY=SECRET_KEY,
+    SQLALCHEMY_DATABASE_URI=db_url,
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
-    SQLALCHEMY_ENGINE_OPTIONS={
-        "poolclass": NullPool,
-        "pool_pre_ping": True,
-    },
+    SQLALCHEMY_ENGINE_OPTIONS={"poolclass": NullPool, "pool_pre_ping": True},
     MAX_CONTENT_LENGTH=16 * 1024 * 1024,
-    
-    MAIL_SERVER='smtp.gmail.com',
+    MAX_FORM_MEMORY_SIZE=1024 * 1024,
+    MAX_FORM_PARTS=200,
+    # Cookies
+    SESSION_COOKIE_NAME="__Host-mall" if IS_PROD else "mall",  # __Host- = Secure, Path=/, no Domain
+    SESSION_COOKIE_SECURE=IS_PROD,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    REMEMBER_COOKIE_SECURE=IS_PROD,
+    REMEMBER_COOKIE_HTTPONLY=True,
+    REMEMBER_COOKIE_SAMESITE="Lax",
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
+    # Mail
+    MAIL_SERVER="smtp.gmail.com",
     MAIL_PORT=587,
     MAIL_USE_TLS=True,
-    MAIL_USERNAME=os.environ.get('MAIL_USERNAME'),
-    MAIL_PASSWORD=os.environ.get('MAIL_PASSWORD'),
-    MAIL_DEFAULT_SENDER=os.environ.get('MAIL_USERNAME')
+    MAIL_USERNAME=os.environ.get("MAIL_USERNAME"),
+    MAIL_PASSWORD=os.environ.get("MAIL_PASSWORD"),
+    MAIL_DEFAULT_SENDER=os.environ.get("MAIL_USERNAME"),
 )
 
 db.init_app(app)
 socketio.init_app(app)
+
+# Behind Render/Heroku/nginx the real client IP, scheme and host arrive in X-Forwarded-* headers.
+# Applied after SocketIO so it wraps everything. Set TRUST_PROXY_HOPS=0 if not behind a proxy.
+_hops = int(os.environ.get("TRUST_PROXY_HOPS", "1" if IS_PROD else "0"))
+if _hops:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=_hops, x_proto=_hops, x_host=_hops)
+
 mail = Mail(app)
-
-def send_email(to_email, subject, html_body):
-    if not app.config['MAIL_USERNAME']: return 
-    try:
-        msg = MailMessage(subject, recipients=[to_email])
-        msg.html = html_body
-        mail.send(msg)
-    except Exception as e:
-        print(f"❌ Email failed to send: {e}")
-
-@app.template_filter("from_json")
-def from_json_filter(value):
-    try: return json.loads(value or "[]")
-    except Exception: return []
 
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 login_manager.login_message = "Please sign in to continue."
 login_manager.login_message_category = "error"
+# "basic" on purpose: "strong" logs users out whenever their IP changes, which is constant on mobile networks.
+login_manager.session_protection = "basic"
+
 
 @login_manager.user_loader
 def load_user(uid):
-    return User.query.get(int(uid))
-
-ALLOWED_EXT = {"png", "jpg", "jpeg", "webp", "gif", "mp4", "webm", "mov"}
-
-def save_file(f):
-    if not f or f.filename == "": return None
-    ext = f.filename.rsplit(".", 1)[-1].lower()
-    if ext not in ALLOWED_EXT: return None
     try:
-        upload_result = cloudinary.uploader.upload(f)
-        return upload_result.get("secure_url")
-    except Exception as e:
-        print(f"Cloudinary Upload Error: {e}")
+        return db.session.get(User, int(uid))
+    except (TypeError, ValueError):
         return None
 
-# ==================================================================
-# PAYSTACK HELPER
-# ==================================================================
-def initialize_paystack(email, amount_ngn, callback_url, metadata=None):
-    url = "https://api.paystack.co/transaction/initialize"
-    headers = {
-        "Authorization": f"Bearer {PAYSTACK_SECRET_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "email": email,
-        "amount": int(amount_ngn * 100),
-        "callback_url": callback_url,
-        "metadata": metadata or {}
-    }
-    response = requests.post(url, json=payload, headers=headers)
-    if response.status_code == 200:
-        return response.json()["data"]["authorization_url"]
-    return None
 
 # ==================================================================
-# AUTO-EXPIRY SYSTEM
+# GENERIC HELPERS
 # ==================================================================
-@app.before_request
-def check_expired_subscriptions():
-    if request.endpoint in ('static', 'admin_applications', 'admin_reels', 'paystack_webhook'): return
+_CTRL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def clip(value, n: int) -> str:
+    """Single-line, control-char-free, length-capped string."""
+    return _CTRL.sub("", (value or "")).strip()[:n]
+
+
+def clip_text(value, n: int) -> str:
+    """Multi-line text (keeps \\n and \\t), length-capped."""
+    s = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", (value or "")).strip()
+    return s[:n]
+
+
+def parse_int(raw, lo, hi):
+    try:
+        v = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    return v if lo <= v <= hi else None
+
+
+def parse_money(raw, lo: float, hi: float):
+    """Parse a money value safely. Rejects NaN/inf/negatives/out-of-range. Returns float or None."""
+    try:
+        d = Decimal(str(raw).strip().replace(",", ""))
+    except (InvalidOperation, AttributeError):
+        return None
+    if not d.is_finite():
+        return None
+    d = d.quantize(Decimal("0.01"))
+    if d < Decimal(str(lo)) or d > Decimal(str(hi)):
+        return None
+    return float(d)
+
+
+def slugify(text: str) -> str:
+    text = re.sub(r"[^\w\s-]", "", (text or "").lower())
+    return re.sub(r"[-\s]+", "-", text).strip("-") or "shop"
+
+
+def unique_slug(name: str) -> str:
+    base = slugify(name)[:100]
+    slug, i = base, 1
+    while Shop.query.filter_by(slug=slug).first():
+        i += 1
+        slug = f"{base}-{i}"
+    return slug
+
+
+def normalize_phone(raw: str) -> str:
+    digits = re.sub(r"\D", "", raw or "")
+    if digits.startswith("234"):
+        return "+" + digits
+    if digits.startswith("0") and len(digits) == 11:
+        return "+234" + digits[1:]
+    return digits
+
+
+def is_valid_ng_phone(raw: str) -> bool:
+    digits = re.sub(r"\D", "", raw or "")
+    return bool(re.match(r"^(234|0)[789][01]\d{8}$", digits))
+
+
+EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
+USERNAME_RE = re.compile(r"^[\w .'\-]{2,50}$")
+DUMMY_HASH = generate_password_hash(secrets.token_hex(16))  # equalises login timing for unknown emails
+
+
+def audit(action: str, **details):
+    audit_log.info("user=%s ip=%s action=%s %s", current_user.get_id(), client_ip(), action,
+                   " ".join(f"{k}={v}" for k, v in details.items()))
+
+
+def admin_required(fn):
+    @wraps(fn)
+    def wrapper(*a, **kw):
+        if not current_user.is_authenticated:
+            return login_manager.unauthorized()
+        if current_user.role != "admin":
+            abort(404)  # don't reveal that admin pages exist
+        return fn(*a, **kw)
+    return wrapper
+
+
+# ==================================================================
+# EMAIL (all dynamic values are HTML-escaped)
+# ==================================================================
+def send_email(to_email, subject, html_body):
+    if not app.config["MAIL_USERNAME"]:
+        return
+    try:
+        msg = MailMessage(clip(subject, 200), recipients=[to_email])
+        msg.html = html_body
+        mail.send(msg)
+    except Exception:
+        log.exception("Email failed to send")
+
+
+# ==================================================================
+# UPLOADS
+# ==================================================================
+def upload_public(stream, kind: str):
+    """Upload an already-validated stream to Cloudinary. Returns secure_url or None."""
+    if stream is None:
+        return None
+    try:
+        res = cloudinary.uploader.upload(
+            stream, resource_type="video" if kind == "video" else "image",
+            folder="mall", unique_filename=True, overwrite=False,
+        )
+        return res.get("secure_url")
+    except Exception:
+        log.exception("Cloudinary upload failed")
+        return None
+
+
+def upload_private_id(stream):
+    """KYC documents are stored as 'authenticated' assets - not reachable by a plain URL."""
+    if stream is None:
+        return None
+    try:
+        res = cloudinary.uploader.upload(
+            stream, resource_type="image", type="authenticated",
+            folder="mall_kyc", unique_filename=True, overwrite=False,
+        )
+        return "private:" + res["public_id"]
+    except Exception:
+        log.exception("Cloudinary private upload failed")
+        return None
+
+
+@app.template_filter("kyc_url")
+def kyc_url_filter(value):
+    """Turn a stored KYC reference into a signed Cloudinary URL (admin pages only)."""
+    if not value:
+        return ""
+    if value.startswith("private:"):
+        url, _ = cloudinary.utils.cloudinary_url(
+            value[len("private:"):], type="authenticated", sign_url=True,
+            secure=True, resource_type="image",
+        )
+        return url
+    return value  # legacy public URL
+
+
+@app.template_filter("from_json")
+def from_json_filter(value):
+    try:
+        return json.loads(value or "[]")
+    except Exception:
+        return []
+
+
+@app.template_filter("safe_url")
+def safe_url_filter(value):
+    """Only http(s) URLs may be used in href attributes (blocks javascript: links)."""
+    return safe_http_url(value) or ""
+
+
+# ==================================================================
+# PAYSTACK
+# ==================================================================
+PAYSTACK_BASE = "https://api.paystack.co"
+
+
+def _paystack(method, path, **kw):
+    try:
+        return requests.request(
+            method, PAYSTACK_BASE + path, timeout=15,
+            headers={"Authorization": f"Bearer {PAYSTACK_SECRET_KEY}", "Content-Type": "application/json"},
+            **kw,
+        )
+    except requests.RequestException:
+        log.exception("Paystack request failed")
+        return None
+
+
+def initialize_paystack(email, amount_ngn, callback_url, reference, metadata=None):
+    r = _paystack("POST", "/transaction/initialize", json={
+        "email": email,
+        "amount": int(round(amount_ngn * 100)),
+        "currency": "NGN",
+        "reference": reference,   # our reference MUST be sent, or the webhook can never match it
+        "callback_url": callback_url,
+        "metadata": metadata or {},
+    })
+    if r is not None and r.status_code == 200:
+        try:
+            return r.json()["data"]["authorization_url"]
+        except (ValueError, KeyError, TypeError):
+            pass
+    return None
+
+
+def verify_paystack(reference):
+    """Ask Paystack directly whether a payment succeeded. Returns ("success"|"failed"|"error", data)."""
+    r = _paystack("GET", f"/transaction/verify/{quote(reference, safe='')}")
+    if r is None or r.status_code != 200:
+        return "error", None
+    try:
+        body = r.json()
+        data = body.get("data") or {}
+    except ValueError:
+        return "error", None
+    if body.get("status") and data.get("status") == "success":
+        return "success", data
+    return "failed", data
+
+
+def activate_shop(shop):
     now = datetime.utcnow()
-    expired_shops = Shop.query.filter(
-        Shop.subscription_status == "ACTIVE",
-        Shop.subscription_expires_at < now
-    ).all()
-    if expired_shops:
-        for shop in expired_shops:
+    shop.activation_paid = True
+    shop.verification_status = "ACTIVE"
+    shop.subscription_status = "ACTIVE"
+    shop.is_approved = True
+    if shop.subscription_expires_at and shop.subscription_expires_at > now:
+        shop.subscription_expires_at += timedelta(days=30)
+    else:
+        shop.subscription_expires_at = now + timedelta(days=30)
+
+
+def restock_order(order, new_status="CANCELLED"):
+    for it in order.items:
+        p = db.session.get(Product, it.product_id)
+        if p:
+            p.stock += it.qty
+        it.status = new_status
+    order.status = new_status
+
+
+def apply_successful_payment(data) -> bool:
+    """
+    Single place where money turns into state. Called by the webhook AND by the
+    return-from-Paystack pages, so it must be idempotent and must check the amount.
+    `data` must come from a signed webhook or from Paystack's verify endpoint.
+    """
+    reference = str(data.get("reference") or "")
+    paid_kobo = data.get("amount")
+    if not reference or data.get("currency", "NGN") != "NGN" or not isinstance(paid_kobo, int):
+        return False
+    metadata = data.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    kind = metadata.get("type")
+
+    # --- shop activation / renewal ---------------------------------
+    if kind == "activation":
+        shop_id = parse_int(metadata.get("shop_id"), 1, 2**31 - 1)
+        shop = Shop.query.filter_by(id=shop_id).with_for_update().first() if shop_id else None
+        if not shop or shop.activation_ref != reference:
+            return False  # unknown, or this payment was already applied
+        if paid_kobo != ACTIVATION_FEE_NGN * 100:
+            log.warning("Activation amount mismatch ref=%s paid=%s", reference, paid_kobo)
+            return False
+        activate_shop(shop)
+        shop.activation_ref = None
+        db.session.commit()
+        log.info("Shop %s activated (ref %s)", shop.id, reference)
+        return True
+
+    # --- reel promotion --------------------------------------------
+    if kind == "reel_promotion":
+        reel_id = parse_int(metadata.get("reel_id"), 1, 2**31 - 1)
+        reel = db.session.get(Reel, reel_id) if reel_id else None
+        if not reel or paid_kobo != REEL_PROMO_FEE_NGN * 100:
+            return False
+        if not reel.is_sponsored:
+            reel.is_sponsored = True   # still needs admin approval before it shows
+            db.session.commit()
+        return True
+
+    # --- normal product order --------------------------------------
+    order = Order.query.filter_by(reference=reference).with_for_update().first()
+    if not order:
+        return False
+    if order.status in ("PAID", "SHIPPED", "DELIVERED"):
+        return True  # already processed (webhook retry)
+    if paid_kobo != int(round(order.total * 100)):
+        log.warning("Order amount mismatch ref=%s paid=%s expected=%s", reference, paid_kobo, order.total)
+        return False
+
+    if order.status == "CANCELLED":
+        # Customer paid after we released the stock. Re-reserve if we still can.
+        locked = {}
+        for it in order.items:
+            locked[it.product_id] = Product.query.filter_by(id=it.product_id).with_for_update().first()
+        if any(locked[it.product_id] is None or locked[it.product_id].stock < it.qty for it in order.items):
+            order.status = "REFUND_REQUIRED"
+            db.session.commit()
+            log.error("PAID AFTER EXPIRY and stock gone - refund needed: %s", reference)
+            return False
+        for it in order.items:
+            locked[it.product_id].stock -= it.qty
+
+    order.status = "PAID"
+    for it in order.items:
+        it.status = "PAID"
+    db.session.commit()
+
+    dash = url_for("dashboard", _external=True)
+    for shop in {it.shop for it in order.items}:
+        send_email(
+            shop.owner.email,
+            f"New Order #{order.reference} - {shop.name}",
+            f"<h2>You have a new order!</h2><p>Hi {escape(shop.name)},</p>"
+            f"<p>Order <b>#{escape(order.reference)}</b> has been paid for by {escape(order.customer.username)}.</p>"
+            f"<p><b>Delivery Address:</b> {escape(order.address)}</p><p><b>Phone:</b> {escape(order.phone)}</p>"
+            f"<p><a href=\"{escape(dash)}\">Log in and mark it as shipped.</a></p>",
+        )
+    log.info("Order %s paid", reference)
+    return True
+
+
+# ==================================================================
+# REQUEST HOOKS
+# ==================================================================
+app.before_request(new_csp_nonce)
+
+
+@app.before_request
+def force_https():
+    if IS_PROD and not request.is_secure and request.endpoint not in ("paystack_webhook", "static"):
+        return redirect(request.url.replace("http://", "https://", 1), code=301)
+
+
+app.before_request(csrf_protect)
+
+_last_maintenance = 0.0
+
+
+@app.before_request
+def maintenance():
+    """Expire subscriptions and release stock held by abandoned checkouts (at most once a minute)."""
+    global _last_maintenance
+    if request.endpoint in ("static", "paystack_webhook"):
+        return
+    now_m = time.monotonic()
+    if now_m - _last_maintenance < 60:
+        return
+    _last_maintenance = now_m
+    try:
+        now = datetime.utcnow()
+        for shop in Shop.query.filter(Shop.subscription_status == "ACTIVE", Shop.subscription_expires_at < now).all():
             shop.subscription_status = "EXPIRED"
             shop.is_approved = False
+        stale = Order.query.filter(Order.status == "PENDING", Order.created_at < now - PENDING_ORDER_TTL) \
+            .with_for_update(skip_locked=True).all()
+        for order in stale:
+            restock_order(order)
         db.session.commit()
+    except Exception:
+        db.session.rollback()
+        log.exception("Maintenance failed")
+
+
+@app.context_processor
+def inject_security():
+    return {"csrf_token": csrf_token, "csp_nonce": getattr(g, "csp_nonce", "")}
+
+
+@app.after_request
+def security_headers(response):
+    return apply_security_headers(response, IS_PROD, CSP_MODE)
+
+
+# ---- error pages (no stack traces, ever) --------------------------
+@app.errorhandler(400)
+@app.errorhandler(403)
+@app.errorhandler(404)
+@app.errorhandler(413)
+@app.errorhandler(429)
+def http_error(e):
+    code = getattr(e, "code", 500)
+    messages = {
+        400: getattr(e, "description", None) or "Bad request.",
+        403: "You don't have permission to do that.",
+        404: "We couldn't find that page.",
+        413: "That upload is too large.",
+        429: "Too many requests. Please wait a moment and try again.",
+    }
+    msg = messages.get(code, "Something went wrong.")
+    if request.is_json or request.headers.get("X-CSRFToken") is not None:
+        return jsonify({"error": msg}), code
+    return render_template("error.html", code=code, message=msg), code
+
+
+@app.errorhandler(500)
+def server_error(e):
+    db.session.rollback()
+    log.exception("Unhandled error")
+    if request.is_json or request.headers.get("X-CSRFToken") is not None:
+        return jsonify({"error": "A server error occurred."}), 500
+    return render_template("error.html", code=500, message="Something went wrong on our side."), 500
+
 
 # ==================================================================
 # AUTH
 # ==================================================================
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    if current_user.is_authenticated: return redirect(url_for("home"))
+    if current_user.is_authenticated:
+        return redirect(url_for("home"))
     if request.method == "POST":
-        email = request.form.get("email", "").strip().lower()
-        password = request.form.get("password", "")
+        email = clip(request.form.get("email"), 120).lower()
+        password = (request.form.get("password") or "")[:256]
+
+        ip_ok = limiter.allow(f"login-ip:{client_ip()}", 20, 900)
+        acct_ok = limiter.allow(f"login-acct:{client_ip()}:{email}", 5, 900)
+        if not (ip_ok and acct_ok):
+            flash("Too many sign-in attempts. Please wait 15 minutes and try again.", "error")
+            return render_template("login.html"), 429
+
         user = User.query.filter_by(email=email).first()
-        if user and check_password_hash(user.password_hash, password):
+        # Always run one hash check so response time doesn't reveal whether the email exists.
+        ok = check_password_hash(user.password_hash if user else DUMMY_HASH, password)
+        if user and ok:
+            session.clear()           # defeat session fixation
             login_user(user)
             nxt = request.args.get("next", "")
-            return redirect(nxt if nxt.startswith("/") else url_for("home"))
+            return redirect(nxt if safe_next_url(nxt) else url_for("home"))
         flash("Invalid email or password.", "error")
     return render_template("login.html")
 
+
 @app.route("/register", methods=["GET", "POST"])
 def register():
-    if current_user.is_authenticated: return redirect(url_for("home"))
+    if current_user.is_authenticated:
+        return redirect(url_for("home"))
     if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        email    = request.form.get("email", "").strip().lower()
-        password = request.form.get("password", "")
-        role     = request.form.get("role", "customer")
-        if role not in ("customer", "vendor"): role = "customer"
+        if not limiter.allow(f"register:{client_ip()}", 10, 3600):
+            flash("Too many sign-ups from this network. Please try again later.", "error")
+            return render_template("login.html"), 429
+        username = clip(request.form.get("username"), 50)
+        email = clip(request.form.get("email"), 120).lower()
+        password = request.form.get("password") or ""
+        role = request.form.get("role", "customer")
+        if role not in ("customer", "vendor"):
+            role = "customer"
 
-        if not username or not email or len(password) < 6:
-            flash("Please fill every field (password ≥ 6 characters).", "error")
+        if not USERNAME_RE.match(username):
+            flash("Name must be 2-50 characters (letters, numbers, spaces, . ' - _).", "error")
             return render_template("login.html")
-
-        if User.query.filter((User.email == email) | (User.username == username)).first():
+        if not EMAIL_RE.match(email):
+            flash("Please enter a valid email address.", "error")
+            return render_template("login.html")
+        if not (10 <= len(password) <= 128):
+            flash("Password must be between 10 and 128 characters.", "error")
+            return render_template("login.html")
+        if password.lower() in (email, username.lower()) or len(set(password)) < 4:
+            flash("Please choose a less predictable password.", "error")
+            return render_template("login.html")
+        if User.query.filter((User.email == email) | (db.func.lower(User.username) == username.lower())).first():
             flash("That email or username is already taken.", "error")
             return render_template("login.html")
 
         user = User(username=username, email=email, password_hash=generate_password_hash(password), role=role)
-        db.session.add(user); db.session.commit()
+        db.session.add(user)
+        db.session.commit()
+        session.clear()
         login_user(user)
-
-        if role == "vendor": return redirect(url_for("vendor_apply"))
-        return redirect(url_for("home"))
+        return redirect(url_for("vendor_apply") if role == "vendor" else url_for("home"))
     return render_template("login.html")
 
-@app.route("/logout")
+
+@app.route("/logout", methods=["POST"])   # POST + CSRF so other sites can't log users out
 @login_required
 def logout():
     logout_user()
+    session.clear()
     return redirect(url_for("home"))
+
 
 # ==================================================================
 # PUBLIC ROUTES
 # ==================================================================
+def _count_view(model, obj_id):
+    """Atomic +1, at most once per visitor per hour per object (stops view-count inflation)."""
+    if limiter.allow(f"view:{model.__name__}:{obj_id}:{client_ip()}", 1, 3600):
+        model.query.filter_by(id=obj_id).update({model.views: model.views + 1}, synchronize_session=False)
+        db.session.commit()
+
+
 @app.route("/")
 def home():
     shops = Shop.query.filter_by(is_approved=True).order_by(Shop.created_at.desc()).limit(12).all()
-    products = Product.query.filter_by(is_active=True).join(Shop).filter(Shop.is_approved.is_(True)).order_by(Product.created_at.desc()).limit(16).all()
+    products = (Product.query.filter_by(is_active=True).join(Shop).filter(Shop.is_approved.is_(True))
+                .order_by(Product.created_at.desc()).limit(16).all())
     return render_template("home.html", shops=shops, products=products)
+
 
 @app.route("/search")
 def search():
-    q = request.args.get("q", "").strip()
-    category = request.args.get("category", "")
+    q = clip(request.args.get("q"), 100)
+    category = clip(request.args.get("category"), 60)
     query = Product.query.filter_by(is_active=True).join(Shop).filter(Shop.is_approved.is_(True))
-    if q: query = query.filter(Product.name.ilike(f"%{q}%") | Product.description.ilike(f"%{q}%"))
-    if category: query = query.filter(Product.shop.has(Shop.category == category))
-    products = query.order_by(Product.created_at.desc()).all()
+    if q:
+        like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        query = query.filter(Product.name.ilike(like, escape="\\") | Product.description.ilike(like, escape="\\"))
+    if category:
+        query = query.filter(Product.shop.has(Shop.category == category))
+    products = query.order_by(Product.created_at.desc()).limit(60).all()
     return render_template("search.html", products=products, q=q, category=category)
+
 
 @app.route("/shop/<slug>")
 def shop_page(slug):
-    shop = Shop.query.filter_by(slug=slug, is_approved=True).first_or_404()
-    shop.views += 1
-    db.session.commit()
-    reviews = Review.query.filter_by(shop_id=shop.id).order_by(Review.created_at.desc()).all()
-    avg_rating = sum([r.rating for r in reviews]) / len(reviews) if reviews else 0.0
+    shop = Shop.query.filter_by(slug=slug[:140], is_approved=True).first_or_404()
+    _count_view(Shop, shop.id)
+    reviews = Review.query.filter_by(shop_id=shop.id).order_by(Review.created_at.desc()).limit(100).all()
+    avg_rating = sum(r.rating for r in reviews) / len(reviews) if reviews else 0.0
     return render_template("shop.html", shop=shop, reviews=reviews, avg_rating=avg_rating)
+
 
 @app.route("/shop/<slug>/review", methods=["POST"])
 @login_required
+@rate_limit(10, 3600, "review", per_user=True)
 def add_review(slug):
-    shop = Shop.query.filter_by(slug=slug).first_or_404()
-    rating = int(request.form.get("rating", 5))
-    comment = request.form.get("comment", "")
-    bought = OrderItem.query.join(Order).filter(Order.customer_id == current_user.id, OrderItem.shop_id == shop.id).first()
+    shop = Shop.query.filter_by(slug=slug[:140], is_approved=True).first_or_404()
+    if shop.owner_id == current_user.id:
+        flash("You can't review your own shop.", "error")
+        return redirect(url_for("shop_page", slug=shop.slug))
+    rating = parse_int(request.form.get("rating"), 1, 5)
+    comment = clip_text(request.form.get("comment"), 1000)
+    if rating is None:
+        flash("Please choose a rating from 1 to 5.", "error")
+        return redirect(url_for("shop_page", slug=shop.slug))
+    # Only PAID/SHIPPED/DELIVERED purchases count - unpaid (PENDING) orders don't.
+    bought = (OrderItem.query.join(Order)
+              .filter(Order.customer_id == current_user.id, OrderItem.shop_id == shop.id,
+                      OrderItem.status.in_(["PAID", "SHIPPED", "DELIVERED"])).first())
     if not bought:
         flash("You can only review shops you have purchased from.", "error")
-        return redirect(url_for("shop_page", slug=slug))
+        return redirect(url_for("shop_page", slug=shop.slug))
+    if Review.query.filter_by(shop_id=shop.id, customer_id=current_user.id).first():
+        flash("You have already reviewed this shop.", "error")
+        return redirect(url_for("shop_page", slug=shop.slug))
     db.session.add(Review(shop_id=shop.id, customer_id=current_user.id, rating=rating, comment=comment))
     db.session.commit()
     flash("Review submitted!", "success")
-    return redirect(url_for("shop_page", slug=slug))
+    return redirect(url_for("shop_page", slug=shop.slug))
+
+
+def _visible_product_or_404(pid):
+    p = db.session.get(Product, pid)
+    if not p:
+        abort(404)
+    owner = current_user.is_authenticated and p.shop.owner_id == current_user.id
+    if not owner and not (p.is_active and p.shop.is_approved):
+        abort(404)  # don't leak unlisted / suspended-shop products
+    return p
+
 
 @app.route("/product/<int:pid>")
 def product_page(pid):
-    p = Product.query.get_or_404(pid)
-    p.views += 1
-    db.session.commit()
+    p = _visible_product_or_404(pid)
+    _count_view(Product, p.id)
     return render_template("product.html", p=p)
+
 
 @app.route("/wishlist/toggle/<int:pid>", methods=["POST"])
 @login_required
+@rate_limit(60, 60, "wishlist", per_user=True)
 def toggle_wishlist(pid):
+    _visible_product_or_404(pid)
     w = Wishlist.query.filter_by(user_id=current_user.id, product_id=pid).first()
     if w:
-        db.session.delete(w); state = False
+        db.session.delete(w)
+        state = False
     else:
-        db.session.add(Wishlist(user_id=current_user.id, product_id=pid)); state = True
+        db.session.add(Wishlist(user_id=current_user.id, product_id=pid))
+        state = True
     db.session.commit()
     return jsonify({"saved": state})
+
 
 @app.route("/wishlist")
 @login_required
@@ -294,43 +730,65 @@ def wishlist():
     items = Wishlist.query.filter_by(user_id=current_user.id).all()
     return render_template("wishlist.html", items=items)
 
+
 @app.route("/reels")
 def reels_feed():
-    reels = Reel.query.filter_by(is_approved=True).join(Shop).filter(Shop.is_approved.is_(True)).order_by(Reel.is_sponsored.desc(), Reel.created_at.desc()).limit(30).all()
+    reels = (Reel.query.filter_by(is_approved=True).join(Shop).filter(Shop.is_approved.is_(True))
+             .order_by(Reel.is_sponsored.desc(), Reel.created_at.desc()).limit(30).all())
     return render_template("reels.html", reels=reels)
+
 
 @app.route("/reels/<int:rid>/like", methods=["POST"])
 @login_required
+@rate_limit(60, 60, "like", per_user=True)
 def like_reel(rid):
-    r = Reel.query.get_or_404(rid); r.likes = (r.likes or 0) + 1
-    db.session.commit(); return jsonify({"likes": r.likes})
+    r = Reel.query.filter_by(id=rid, is_approved=True).first_or_404()
+    existing = ReelLike.query.filter_by(reel_id=r.id, user_id=current_user.id).first()
+    if existing:
+        db.session.delete(existing)
+        r.likes = max(0, (r.likes or 0) - 1)
+    else:
+        db.session.add(ReelLike(reel_id=r.id, user_id=current_user.id))
+        r.likes = (r.likes or 0) + 1
+    db.session.commit()
+    return jsonify({"likes": r.likes})
+
 
 @app.route("/reels/<int:rid>/view", methods=["POST"])
+@rate_limit(120, 60, "reelview")
 def view_reel(rid):
-    r = Reel.query.get(rid)
-    if r: r.views = (r.views or 0) + 1; db.session.commit()
+    if limiter.allow(f"reelview:{rid}:{client_ip()}", 1, 3600):
+        Reel.query.filter_by(id=rid, is_approved=True).update({Reel.views: Reel.views + 1}, synchronize_session=False)
+        db.session.commit()
     return jsonify({"ok": True})
+
 
 # ==================================================================
 # CHAT
 # ==================================================================
-@app.route("/chat/<slug>", methods=["GET", "POST"])
+@app.route("/chat/<slug>")
 @login_required
 def chat(slug):
-    shop = Shop.query.filter_by(slug=slug, is_approved=True).first_or_404()
+    shop = Shop.query.filter_by(slug=slug[:140], is_approved=True).first_or_404()
     customer_id = request.args.get("customer", type=int)
-    if customer_id and shop.owner_id == current_user.id:
-        conv = Conversation.query.filter_by(customer_id=customer_id, shop_id=shop.id).first()
-        if not conv:
-            conv = Conversation(customer_id=customer_id, shop_id=shop.id)
-            db.session.add(conv); db.session.commit()
-        return render_template("chat.html", conv=conv, shop=shop)
-    if shop.owner_id == current_user.id: return redirect(url_for("dashboard"))
-    conv = Conversation.query.filter_by(customer_id=current_user.id, shop_id=shop.id).first()
+    if shop.owner_id == current_user.id:
+        if not customer_id:
+            return redirect(url_for("dashboard"))
+        if not db.session.get(User, customer_id) or customer_id == current_user.id:
+            abort(404)
+    else:
+        customer_id = current_user.id
+    conv = Conversation.query.filter_by(customer_id=customer_id, shop_id=shop.id).first()
     if not conv:
-        conv = Conversation(customer_id=current_user.id, shop_id=shop.id)
-        db.session.add(conv); db.session.commit()
-    return render_template("chat.html", conv=conv, shop=shop)
+        conv = Conversation(customer_id=customer_id, shop_id=shop.id)
+        db.session.add(conv)
+        db.session.commit()
+    history = [{
+        "id": m.id, "body": m.body, "sender_id": m.sender_id, "image": None,
+        "created_at": m.created_at.strftime("%H:%M"),
+    } for m in conv.messages[-200:]]
+    return render_template("chat.html", conv=conv, shop=shop, history=history)
+
 
 # ==================================================================
 # CART & CHECKOUT
@@ -339,61 +797,93 @@ def chat(slug):
 def cart():
     return render_template("cart.html")
 
+
+class CheckoutError(Exception):
+    pass
+
+
 @app.route("/checkout", methods=["POST"])
 @login_required
+@rate_limit(10, 600, "checkout", per_user=True)
 def checkout():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Invalid request"}), 400
+    raw_items = data.get("items")
+    if not isinstance(raw_items, list) or not raw_items or len(raw_items) > 50:
+        return jsonify({"error": "Cart is empty or invalid"}), 400
+
+    wanted = {}
+    for it in raw_items:
+        pid = parse_int(it.get("product_id"), 1, 2**31 - 1) if isinstance(it, dict) else None
+        qty = parse_int(it.get("qty", 1), 1, 20) if isinstance(it, dict) else None
+        if pid is None or qty is None:
+            return jsonify({"error": "Invalid cart item"}), 400
+        wanted[pid] = min(wanted.get(pid, 0) + qty, 20)
+
+    address = clip_text(data.get("address"), 300)
+    phone = clip(data.get("phone"), 40)
+    if len(address) < 8:
+        return jsonify({"error": "Please enter a full delivery address"}), 400
+    if not is_valid_ng_phone(phone):
+        return jsonify({"error": "Please enter a valid Nigerian phone number"}), 400
+
     try:
-        data  = request.get_json(silent=True) or {}
-        items = data.get("items", [])
-        if not items: return jsonify({"error": "Cart is empty"}), 400
-
-        total, lines = 0.0, []
-        for it in items:
-            p = Product.query.get(it.get("product_id"))
+        lines, total = [], Decimal("0")
+        for pid in sorted(wanted):                       # fixed order -> no deadlocks
+            p = Product.query.filter_by(id=pid).with_for_update().first()   # row lock: no overselling
             if not p or not p.is_active or not p.shop.is_approved:
-                return jsonify({"error": "A product in your cart is unavailable"}), 400
-            qty = max(1, int(it.get("qty", 1)))
-            if p.stock < qty:
-                return jsonify({"error": f"{p.name} is out of stock"}), 400
-            total += p.price * qty
-            lines.append((p, qty))
+                raise CheckoutError("A product in your cart is unavailable")
+            if p.shop.owner_id == current_user.id:
+                raise CheckoutError("You can't buy from your own shop")
+            if p.stock < wanted[pid]:
+                raise CheckoutError(f"{p.name} is out of stock")
+            total += Decimal(str(p.price)) * wanted[pid]
+            lines.append((p, wanted[pid]))
 
-        order = Order(
-            customer_id=current_user.id, total=total,
-            reference="ORD-" + uuid.uuid4().hex[:8].upper(),
-            status="PENDING", 
-            address=data.get("address"), phone=data.get("phone"),
-        )
-        db.session.add(order); db.session.flush()
-        
+        total_f = float(total.quantize(Decimal("0.01")))
+        order = Order(customer_id=current_user.id, total=total_f,
+                      reference="ORD-" + uuid.uuid4().hex[:12].upper(), status="PENDING",
+                      address=address, phone=normalize_phone(phone))
+        db.session.add(order)
+        db.session.flush()
         for p, qty in lines:
-            db.session.add(OrderItem(
-                order_id=order.id, shop_id=p.shop_id, product_id=p.id,
-                name=p.name, price=p.price, qty=qty, status="PENDING"))
+            db.session.add(OrderItem(order_id=order.id, shop_id=p.shop_id, product_id=p.id,
+                                     name=p.name, price=p.price, qty=qty, status="PENDING"))
             p.stock -= qty
         db.session.commit()
-
-        callback_url = url_for('payment_success', reference=order.reference, _external=True)
-        auth_url = initialize_paystack(current_user.email, total, callback_url)
-
-        if not auth_url:
-            # Rollback the order if Paystack fails
-            db.session.delete(order)
-            db.session.commit()
-            return jsonify({"error": "Payment gateway error. Please try again."}), 500
-
-        return jsonify({"authorization_url": auth_url, "reference": order.reference})
-        
-    except Exception as e:
+    except CheckoutError as e:
         db.session.rollback()
-        print(f"CHECKOUT ERROR: {e}")
+        return jsonify({"error": str(e)}), 400
+    except Exception:
+        db.session.rollback()
+        log.exception("Checkout failed")
         return jsonify({"error": "A server error occurred. Please try again."}), 500
+
+    auth_url = initialize_paystack(
+        current_user.email, total_f, url_for("payment_success", reference=order.reference, _external=True),
+        reference=order.reference, metadata={"type": "order", "order_id": order.id},
+    )
+    if not auth_url:
+        restock_order(order)          # give the stock back
+        db.session.commit()
+        return jsonify({"error": "Payment gateway error. Please try again."}), 502
+    return jsonify({"authorization_url": auth_url, "reference": order.reference})
+
 
 @app.route("/payment-success/<reference>")
 @login_required
+@rate_limit(30, 600, "payret", per_user=True)
 def payment_success(reference):
-    order = Order.query.filter_by(reference=reference, customer_id=current_user.id).first_or_404()
+    order = Order.query.filter_by(reference=reference[:40], customer_id=current_user.id).first_or_404()
+    if order.status == "PENDING":
+        # Don't wait for the webhook - ask Paystack directly.
+        status, data = verify_paystack(order.reference)
+        if status == "success" and data.get("reference") == order.reference:
+            apply_successful_payment(data)
+            db.session.refresh(order)
     return render_template("payment_success.html", order=order)
+
 
 @app.route("/orders")
 @login_required
@@ -401,474 +891,587 @@ def orders():
     my_orders = Order.query.filter_by(customer_id=current_user.id).order_by(Order.created_at.desc()).all()
     return render_template("orders.html", orders=my_orders)
 
+
 @app.route("/order/confirm-delivery/<int:item_id>", methods=["POST"])
 @login_required
 def confirm_delivery(item_id):
-    item = OrderItem.query.get_or_404(item_id)
-    if item.order.customer_id != current_user.id: return "Unauthorized", 403
+    item = OrderItem.query.filter_by(id=item_id).with_for_update().first_or_404()
+    if item.order.customer_id != current_user.id:
+        abort(403)
     if item.status == "SHIPPED":
         item.status = "DELIVERED"
-        payout = (item.price * item.qty) * (1 - PLATFORM_COMMISSION)
-        item.shop.wallet_balance += payout
+        payout = round(item.price * item.qty * (1 - PLATFORM_COMMISSION), 2)
+        # Atomic SQL increment - two simultaneous clicks can't double-pay the vendor.
+        Shop.query.filter_by(id=item.shop_id).update(
+            {Shop.wallet_balance: Shop.wallet_balance + payout}, synchronize_session=False)
         db.session.commit()
         flash("Delivery confirmed! Funds released to vendor.", "success")
     return redirect(url_for("orders"))
+
 
 # ==================================================================
 # PAYSTACK WEBHOOK
 # ==================================================================
 @app.route("/paystack-webhook", methods=["POST"])
 def paystack_webhook():
-    signature = request.headers.get('X-Paystack-Signature', '')
-    if not signature: return 'Missing signature', 400
+    signature = request.headers.get("X-Paystack-Signature", "")
+    if not signature:
+        return "Missing signature", 400
+    raw = request.get_data()
+    computed = hmac.new(PAYSTACK_SECRET_KEY.encode("utf-8"), msg=raw, digestmod=hashlib.sha512).hexdigest()
+    if not hmac.compare_digest(computed, signature):
+        return "Invalid signature", 400
+    try:
+        event = json.loads(raw)
+    except ValueError:
+        return "Bad payload", 400
 
-    computed_hash = hmac.new(
-        PAYSTACK_SECRET_KEY.encode('utf-8'),
-        msg=request.data,
-        digestmod=hashlib.sha512
-    ).hexdigest()
+    if isinstance(event, dict) and event.get("event") == "charge.success" and isinstance(event.get("data"), dict):
+        reference = str(event["data"].get("reference") or "")
+        # Defence in depth: confirm with Paystack instead of trusting the payload alone.
+        status, verified = verify_paystack(reference)
+        if status == "error":
+            return "", 500            # transient - ask Paystack to retry later
+        if status == "success":
+            try:
+                apply_successful_payment(verified)
+            except Exception:
+                db.session.rollback()
+                log.exception("Webhook processing failed")
+                return "", 500
+    return "", 200
 
-    if not hmac.compare_digest(computed_hash, signature):
-        return 'Invalid signature', 400
-
-    event = json.loads(request.data)
-    if event.get('event') == 'charge.success':
-        data = event['data']
-        reference = data['reference']
-        metadata = data.get('metadata', {})
-        
-        # 1. Handle Reel Promotion Payment
-        if metadata.get("type") == "reel_promotion":
-            reel_id = metadata.get("reel_id")
-            reel = Reel.query.get(reel_id)
-            if reel:
-                reel.is_sponsored = True # Payment successful, now show as sponsored
-                # Note: We keep is_approved=False so Admin still needs to review the video
-                db.session.commit()
-                print(f"✅ Reel Promo Payment verified for Reel {reel_id}")
-            return '', 200
-
-        # 2. Handle Normal Product Order
-        order = Order.query.filter_by(reference=reference).first()
-        if order and order.status == "PENDING":
-            order.status = "PAID"
-            for item in order.items:
-                item.status = "PAID"
-            db.session.commit()
-            
-            shops_in_order = {item.shop for item in order.items}
-            for shop in shops_in_order:
-                vendor_email = shop.owner.email
-                send_email(
-                    vendor_email,
-                    f"🛒 New Order #{order.reference} - {shop.name}",
-                    f"""
-                    <h2>You have a new order!</h2>
-                    <p>Hi {shop.name},</p>
-                    <p>Order <b>#{order.reference}</b> has been paid for by {order.customer.username}.</p>
-                    <p><b>Delivery Address:</b> {order.address}</p>
-                    <p><b>Phone:</b> {order.phone}</p>
-                    <br>
-                    <p><a href="https://your-render-url.onrender.com/dashboard">Click here to log in and mark it as shipped.</a></p>
-                    """
-                )
-            print(f"✅ Payment verified for Order {reference}")
-
-    return '', 200
 
 # ==================================================================
-# VENDOR DASHBOARD
+# VENDOR
 # ==================================================================
 @app.route("/vendor/apply", methods=["GET", "POST"])
 @login_required
 def vendor_apply():
-    if current_user.role != "vendor": return redirect(url_for("home"))
+    if current_user.role != "vendor":
+        return redirect(url_for("home"))
     existing = current_user.shop
-    if existing and existing.verification_status == "ACTIVE": return redirect(url_for("dashboard"))
+    if existing and existing.verification_status == "ACTIVE":
+        return redirect(url_for("dashboard"))
 
     if request.method == "POST":
         form, files = request.form, request.files
-        checks = run_application_checks(form, files)
-        if checks["blocking"]:
-            for msg in checks["blocking"]: flash(msg, "error")
+        name = clip(form.get("name"), 120)
+        seller_type = form.get("seller_type") if form.get("seller_type") in ("business", "individual") else "business"
+        cac = clip(form.get("cac_number"), 60)
+        errors = []
+        if len(name) < 3:
+            errors.append("Business name must be at least 3 characters.")
+        if not is_valid_ng_phone(form.get("phone", "")):
+            errors.append("Phone number must be a valid Nigerian number.")
+        if seller_type == "business" and len(cac) < 4:
+            errors.append("Registered businesses must provide a CAC / RC number.")
+        clash = Shop.query.filter(Shop.name.ilike(name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_"), escape="\\"))
+        if existing:
+            clash = clash.filter(Shop.id != existing.id)
+        if clash.first():
+            errors.append("A shop with this name already exists.")
+
+        id_stream = sanitize_upload(files.get("id_image"), "image")
+        if id_stream is None and not (existing and existing.id_image):
+            errors.append("Please upload a clear photo (JPG/PNG/WEBP, max 5MB) of your government ID.")
+        logo_stream = sanitize_upload(files.get("logo"), "image") if files.get("logo") and files["logo"].filename else None
+        banner_stream = sanitize_upload(files.get("banner"), "image") if files.get("banner") and files["banner"].filename else None
+        if (files.get("logo") and files["logo"].filename and logo_stream is None) or \
+           (files.get("banner") and files["banner"].filename and banner_stream is None):
+            errors.append("Logo/banner must be a valid image under 5MB.")
+
+        if errors:
+            for msg in errors:
+                flash(msg, "error")
             return render_template("apply.html", shop=existing, form=form)
 
-        name = form["name"].strip()
         if existing:
             shop = existing
             if shop.name.lower() != name.lower():
-                base = slugify(name); slug, i = base, 1
-                while Shop.query.filter_by(slug=slug).first(): i += 1; slug = f"{base}-{i}"
-                shop.name, shop.slug = name, slug
+                shop.name, shop.slug = name, unique_slug(name)
         else:
-            base = slugify(name); slug, i = base, 1
-            while Shop.query.filter_by(slug=slug).first(): i += 1; slug = f"{base}-{i}"
-            shop = Shop(owner_id=current_user.id, name=name, slug=slug)
+            shop = Shop(owner_id=current_user.id, name=name, slug=unique_slug(name))
             db.session.add(shop)
 
-        shop.category = form.get("category"); shop.description = form.get("description")
-        shop.seller_type = form.get("seller_type"); shop.phone = normalize_phone(form.get("phone"))
-        shop.business_email = form.get("business_email"); shop.address = form.get("address")
-        shop.city = form.get("city"); shop.state = form.get("state"); shop.location = f"{form.get('city')}, {form.get('state')}"
-        shop.cac_number = form.get("cac_number"); shop.id_type = form.get("id_type"); shop.id_number = form.get("id_number")
-        shop.product_summary = form.get("product_summary"); shop.price_range = form.get("price_range")
-        shop.social_links = json.dumps([s.strip() for s in (form.get("social_links") or "").splitlines() if s.strip()])
-        
-        shop.logo = save_file(files.get("logo")) or shop.logo
-        shop.banner = save_file(files.get("banner")) or shop.banner
-        shop.id_image = save_file(files.get("id_image")) or shop.id_image
+        shop.category = clip(form.get("category"), 60)
+        shop.description = clip_text(form.get("description"), 2000)
+        shop.seller_type = seller_type
+        shop.legal_name = clip(form.get("legal_name"), 200)
+        shop.phone = normalize_phone(form.get("phone"))
+        shop.whatsapp = clip(form.get("whatsapp"), 40)
+        shop.business_email = clip(form.get("business_email"), 120)
+        shop.address = clip_text(form.get("address"), 300)
+        shop.city = clip(form.get("city"), 80)
+        shop.state = clip(form.get("state"), 80)
+        shop.location = f"{shop.city}, {shop.state}"
+        shop.cac_number = cac
+        shop.id_type = clip(form.get("id_type"), 40)
+        shop.id_number = clip(form.get("id_number"), 80)
+        shop.product_summary = clip_text(form.get("product_summary"), 1000)
+        shop.price_range = clip(form.get("price_range"), 60)
+        links = [safe_http_url(s) for s in (form.get("social_links") or "").splitlines()[:5]]
+        shop.social_links = json.dumps([u for u in links if u])   # http(s) only: no javascript: links
+
+        if id_stream is not None:
+            shop.id_image = upload_private_id(id_stream) or shop.id_image
+        if logo_stream is not None:
+            shop.logo = upload_public(logo_stream, "image") or shop.logo
+        if banner_stream is not None:
+            shop.banner = upload_public(banner_stream, "image") or shop.banner
 
         shop.verification_status = "PENDING_REVIEW"
-        shop.auto_flags = json.dumps(checks["warnings"])
+        shop.auto_flags = "[]"
         shop.submitted_at = datetime.utcnow()
         db.session.commit()
         flash("Application submitted for review.", "success")
         return redirect(url_for("vendor_status"))
-    
-    form = {k: getattr(existing, k, "") or "" for k in ["name","category","description","seller_type","phone","business_email","address","city","state","cac_number","id_type","id_number","product_summary","price_range"]}
-    if existing and existing.social_links: form["social_links"] = "\n".join(json.loads(existing.social_links))
+
+    keys = ["name", "category", "description", "seller_type", "legal_name", "phone", "whatsapp", "business_email",
+            "address", "city", "state", "cac_number", "id_type", "id_number", "product_summary", "price_range"]
+    form = {k: getattr(existing, k, "") or "" for k in keys}
+    if existing and existing.social_links:
+        form["social_links"] = "\n".join(from_json_filter(existing.social_links))
     return render_template("apply.html", shop=existing, form=form)
+
 
 @app.route("/vendor/status")
 @login_required
 def vendor_status():
-    if current_user.role != "vendor": return redirect(url_for("home"))
-    if not current_user.shop: return redirect(url_for("vendor_apply"))
+    if current_user.role != "vendor":
+        return redirect(url_for("home"))
+    if not current_user.shop:
+        return redirect(url_for("vendor_apply"))
     return render_template("vendor_status.html", shop=current_user.shop, fee=ACTIVATION_FEE_NGN)
+
 
 @app.route("/vendor/pay-activation", methods=["GET", "POST"])
 @login_required
 def pay_activation():
     shop = current_user.shop
-    if not shop: return redirect(url_for("vendor_apply"))
-    
+    if current_user.role != "vendor" or not shop:
+        return redirect(url_for("vendor_apply"))
+    # Only admin-approved shops may pay to go live (or ACTIVE shops renewing).
+    if shop.verification_status not in ("APPROVED", "ACTIVE"):
+        flash("Your application must be approved before you can activate your shop.", "error")
+        return redirect(url_for("vendor_status"))
+
     if request.method == "POST":
-        shop.activation_paid = True
-        shop.verification_status = "ACTIVE"
-        shop.subscription_status = "ACTIVE"
-        shop.is_approved = True
-        
-        now = datetime.utcnow()
-        if shop.subscription_expires_at and shop.subscription_expires_at > now:
-            shop.subscription_expires_at = shop.subscription_expires_at + timedelta(days=30)
-        else:
-            shop.subscription_expires_at = now + timedelta(days=30)
-            
+        if not limiter.allow(f"payinit:{current_user.id}", 5, 600):
+            abort(429)
+        ref = f"ACT-{shop.id}-{uuid.uuid4().hex[:12]}"
+        shop.activation_ref = ref
         db.session.commit()
-        flash("🎉 Payment confirmed — your shop is LIVE for 30 days!", "success")
-        return redirect(url_for("dashboard"))
+        auth_url = initialize_paystack(
+            current_user.email, ACTIVATION_FEE_NGN, url_for("activation_return", _external=True),
+            reference=ref, metadata={"type": "activation", "shop_id": shop.id},
+        )
+        if not auth_url:
+            flash("Payment gateway error. Please try again.", "error")
+            return redirect(url_for("pay_activation"))
+        return redirect(auth_url)
     return render_template("vendor_pay.html", shop=shop, fee=ACTIVATION_FEE_NGN)
+
+
+@app.route("/vendor/pay-activation/return")
+@login_required
+@rate_limit(30, 600, "actreturn", per_user=True)
+def activation_return():
+    shop = current_user.shop
+    ref = clip(request.args.get("reference"), 60)
+    if not shop or not ref:
+        return redirect(url_for("vendor_status"))
+    if shop.activation_ref == ref:
+        status, data = verify_paystack(ref)
+        if status == "success" and apply_successful_payment(data):
+            flash("Payment confirmed - your shop is LIVE for 30 days!", "success")
+            return redirect(url_for("dashboard"))
+    elif shop.verification_status == "ACTIVE" and shop.is_approved:
+        return redirect(url_for("dashboard"))   # webhook already applied it
+    flash("We haven't received confirmation of your payment yet. If you were charged it will activate shortly.", "error")
+    return redirect(url_for("vendor_status"))
+
 
 @app.route("/dashboard")
 @login_required
 def dashboard():
     shop = current_user.shop
-    if not shop: return redirect(url_for("vendor_apply"))
-    if shop.verification_status == "PENDING_REVIEW": return redirect(url_for("vendor_status"))
-    if shop.verification_status == "REJECTED": return redirect(url_for("vendor_status"))
-    if shop.verification_status == "APPROVED" and not shop.activation_paid: return redirect(url_for("pay_activation"))
-    if shop.subscription_status == "EXPIRED": return redirect(url_for("pay_activation"))
-    if shop.verification_status != "ACTIVE": return redirect(url_for("vendor_status"))
+    if not shop:
+        return redirect(url_for("vendor_apply"))
+    if shop.verification_status in ("PENDING_REVIEW", "REJECTED"):
+        return redirect(url_for("vendor_status"))
+    if shop.verification_status == "APPROVED" and not shop.activation_paid:
+        return redirect(url_for("pay_activation"))
+    if shop.subscription_status == "EXPIRED":
+        return redirect(url_for("pay_activation"))
+    if shop.verification_status != "ACTIVE":
+        return redirect(url_for("vendor_status"))
 
-    products    = Product.query.filter_by(shop_id=shop.id).order_by(Product.created_at.desc()).all()
-    convos      = Conversation.query.filter_by(shop_id=shop.id).order_by(Conversation.created_at.desc()).all()
+    products = Product.query.filter_by(shop_id=shop.id).order_by(Product.created_at.desc()).all()
+    convos = Conversation.query.filter_by(shop_id=shop.id).order_by(Conversation.created_at.desc()).all()
     order_items = OrderItem.query.filter_by(shop_id=shop.id).order_by(OrderItem.id.desc()).all()
-    reels       = Reel.query.filter_by(shop_id=shop.id).order_by(Reel.created_at.desc()).all()
-    
+    reels = Reel.query.filter_by(shop_id=shop.id).order_by(Reel.created_at.desc()).all()
     days_left = max(0, (shop.subscription_expires_at - datetime.utcnow()).days) if shop.subscription_expires_at else 0
     total_sales = sum(i.price * i.qty for i in order_items if i.status in ["PAID", "SHIPPED", "DELIVERED"])
-    
-    return render_template("dashboard.html", shop=shop, products=products, order_items=order_items, convos=convos, reels=reels, days_left=days_left, total_sales=total_sales)
+    return render_template("dashboard.html", shop=shop, products=products, order_items=order_items,
+                           convos=convos, reels=reels, days_left=days_left, total_sales=total_sales)
+
 
 @app.route("/vendor/ship/<int:item_id>", methods=["POST"])
 @login_required
 def ship_item(item_id):
-    item = OrderItem.query.get_or_404(item_id)
-    if item.shop.owner_id != current_user.id: return "Unauthorized", 403
+    item = OrderItem.query.filter_by(id=item_id).with_for_update().first_or_404()
+    if item.shop.owner_id != current_user.id:
+        abort(403)
     if item.status == "PAID":
         item.status = "SHIPPED"
         db.session.commit()
         flash("Marked as shipped. Waiting for customer confirmation.", "success")
     return redirect(url_for("dashboard"))
 
+
+def _active_vendor_shop():
+    shop = current_user.shop
+    if current_user.role != "vendor" or not shop or shop.verification_status != "ACTIVE" \
+            or shop.subscription_status != "ACTIVE":
+        return None
+    return shop
+
+
 @app.route("/vendor/product/add", methods=["POST"])
 @login_required
+@rate_limit(30, 3600, "addproduct", per_user=True)
 def add_product():
-    shop = current_user.shop
-    if not shop or shop.verification_status != "ACTIVE": return redirect(url_for("dashboard"))
-    db.session.add(Product(
-        shop_id=shop.id, name=request.form.get("name"),
-        description=request.form.get("description"),
-        price=float(request.form.get("price", 0)), stock=int(request.form.get("stock", 0)),
-        image=save_file(request.files.get("image"))
-    ))
-    db.session.commit(); flash("Product added.", "success")
+    shop = _active_vendor_shop()
+    if not shop:
+        return redirect(url_for("dashboard"))
+    name = clip(request.form.get("name"), 200)
+    price = parse_money(request.form.get("price"), 1, 100_000_000)
+    stock = parse_int(request.form.get("stock", 0), 0, 100_000)
+    if len(name) < 2 or price is None or stock is None:
+        flash("Enter a product name, a price between ₦1 and ₦100,000,000, and a stock of 0-100,000.", "error")
+        return redirect(url_for("dashboard"))
+    image = None
+    f = request.files.get("image")
+    if f and f.filename:
+        stream = sanitize_upload(f, "image")
+        if stream is None:
+            flash("Product image must be a valid JPG/PNG/WEBP/GIF under 5MB.", "error")
+            return redirect(url_for("dashboard"))
+        image = upload_public(stream, "image")
+    db.session.add(Product(shop_id=shop.id, name=name, description=clip_text(request.form.get("description"), 3000),
+                           price=price, stock=stock, image=image))
+    db.session.commit()
+    flash("Product added.", "success")
     return redirect(url_for("dashboard"))
 
+
 # ==================================================================
-# REEL PROMOTION (WITH PAYMENT)
+# REEL PROMOTION
 # ==================================================================
 @app.route("/dashboard/reel/upload", methods=["POST"])
 @login_required
+@rate_limit(10, 3600, "reelupload", per_user=True)
 def upload_reel():
-    shop = current_user.shop
-    if not shop or shop.verification_status != "ACTIVE":
+    shop = _active_vendor_shop()
+    if not shop:
         return jsonify({"error": "Shop must be active."}), 403
 
-    video = request.files.get("video")
-    if not video:
-        return jsonify({"error": "Video file is required."}), 400
+    video_stream = sanitize_upload(request.files.get("video"), "video")
+    if video_stream is None:
+        return jsonify({"error": "Please upload a valid MP4/WEBM/MOV video under 15MB."}), 400
+    poster_file = request.files.get("poster")
+    poster_stream = None
+    if poster_file and poster_file.filename:
+        poster_stream = sanitize_upload(poster_file, "image")
+        if poster_stream is None:
+            return jsonify({"error": "Poster must be a valid image under 5MB."}), 400
 
-    video_url = save_file(video)
+    product_id = None
+    raw_pid = request.form.get("product_id")
+    if raw_pid:
+        pid = parse_int(raw_pid, 1, 2**31 - 1)
+        # The tagged product must belong to THIS shop.
+        if pid is None or not Product.query.filter_by(id=pid, shop_id=shop.id).first():
+            return jsonify({"error": "Invalid product selected."}), 400
+        product_id = pid
+
+    video_url = upload_public(video_stream, "video")
     if not video_url:
         return jsonify({"error": "Video upload failed."}), 500
 
-    # Create the Reel (unpaid for now)
-    reel = Reel(
-        shop_id=shop.id,
-        video_url=video_url,
-        poster_url=save_file(request.files.get("poster")),
-        caption=request.form.get("caption"),
-        product_id=request.form.get("product_id") or None,
-        is_sponsored=False, # Will turn True once paid
-        is_approved=False
-    )
+    reel = Reel(shop_id=shop.id, video_url=video_url, poster_url=upload_public(poster_stream, "image"),
+                caption=clip_text(request.form.get("caption"), 300), product_id=product_id,
+                is_sponsored=False, is_approved=False)
     db.session.add(reel)
     db.session.commit()
 
-    # Initialize Paystack for ₦10,000
-    callback_url = url_for('dashboard', _external=True) # Return to dashboard after payment
+    ref = f"REEL-{reel.id}-{uuid.uuid4().hex[:12]}"
     auth_url = initialize_paystack(
-        current_user.email, 
-        REEL_PROMO_FEE_NGN, 
-        callback_url, 
-        metadata={"type": "reel_promotion", "reel_id": reel.id}
+        current_user.email, REEL_PROMO_FEE_NGN, url_for("reel_return", _external=True), reference=ref,
+        metadata={"type": "reel_promotion", "reel_id": reel.id},
     )
-
     if not auth_url:
-        return jsonify({"error": "Payment gateway error."}), 500
-
+        return jsonify({"error": "Payment gateway error."}), 502
     return jsonify({"authorization_url": auth_url})
+
+
+@app.route("/dashboard/reel/return")
+@login_required
+@rate_limit(30, 600, "reelreturn", per_user=True)
+def reel_return():
+    ref = clip(request.args.get("reference"), 60)
+    m = re.fullmatch(r"REEL-(\d+)-[0-9a-f]{12}", ref)
+    shop = current_user.shop
+    if m and shop:
+        reel = db.session.get(Reel, int(m.group(1)))
+        if reel and reel.shop_id == shop.id:
+            status, data = verify_paystack(ref)
+            if status == "success" and (data.get("metadata") or {}).get("reel_id") == reel.id:
+                apply_successful_payment(data)
+                flash("Promotion paid. Your reel will go live once an admin approves it.", "success")
+    return redirect(url_for("dashboard"))
+
 
 # ==================================================================
 # WITHDRAWALS
 # ==================================================================
 @app.route("/vendor/withdraw", methods=["POST"])
 @login_required
+@rate_limit(5, 3600, "withdraw", per_user=True)
 def vendor_withdraw():
-    shop = current_user.shop
-    if not shop: return redirect(url_for("home"))
-    
-    amount = float(request.form.get("amount", 0))
-    bank_name = request.form.get("bank_name")
-    acc_name = request.form.get("account_name")
-    acc_num = request.form.get("account_number")
+    shop = _active_vendor_shop()
+    if not shop:
+        return redirect(url_for("home"))
+    amount = parse_money(request.form.get("amount"), 1, 50_000_000)
+    bank_name = clip(request.form.get("bank_name"), 100)
+    acc_name = clip(request.form.get("account_name"), 100)
+    acc_num = re.sub(r"\s", "", request.form.get("account_number") or "")
 
-    if amount <= 0 or amount > shop.wallet_balance:
-        flash("Invalid amount. You cannot withdraw more than your balance.", "error")
+    if not bank_name or not acc_name or not re.fullmatch(r"\d{10}", acc_num):
+        flash("Enter your bank, the account name and a valid 10-digit account number.", "error")
+        return redirect(url_for("dashboard"))
+    if amount is None:
+        flash("Enter a valid amount.", "error")
         return redirect(url_for("dashboard"))
 
-    if not bank_name or not acc_name or not acc_num:
-        flash("Please fill in all bank details.", "error")
+    # Debit and balance check in ONE atomic statement: concurrent requests can't overdraw the wallet.
+    debited = Shop.query.filter(Shop.id == shop.id, Shop.wallet_balance >= amount).update(
+        {Shop.wallet_balance: Shop.wallet_balance - amount}, synchronize_session=False)
+    if debited != 1:
+        db.session.rollback()
+        flash("You cannot withdraw more than your balance.", "error")
         return redirect(url_for("dashboard"))
-
-    shop.wallet_balance -= amount
-    withdrawal = Withdrawal(shop_id=shop.id, amount=amount, bank_name=bank_name, account_name=acc_name, account_number=acc_num)
-    db.session.add(withdrawal)
+    db.session.add(Withdrawal(shop_id=shop.id, amount=amount, bank_name=bank_name,
+                              account_name=acc_name, account_number=acc_num))
     db.session.commit()
-    
+    audit("withdrawal_requested", shop=shop.id, amount=amount)
     flash("Withdrawal request submitted! Admin will process it shortly.", "success")
     return redirect(url_for("dashboard"))
 
+
 @app.route("/admin/withdrawals")
-@login_required
+@admin_required
 def admin_withdrawals():
-    if current_user.role != "admin": return redirect(url_for("home"))
     pending = Withdrawal.query.filter_by(status="PENDING").order_by(Withdrawal.created_at.desc()).all()
-    history = Withdrawal.query.filter(Withdrawal.status != "PENDING").order_by(Withdrawal.processed_at.desc()).limit(20).all()
+    history = (Withdrawal.query.filter(Withdrawal.status != "PENDING")
+               .order_by(Withdrawal.processed_at.desc()).limit(20).all())
     return render_template("admin_withdrawals.html", pending=pending, history=history)
 
+
 @app.route("/admin/withdrawals/<int:wid>/approve", methods=["POST"])
-@login_required
+@admin_required
 def admin_approve_withdrawal(wid):
-    if current_user.role != "admin": return "Forbidden", 403
-    w = Withdrawal.query.get_or_404(wid)
+    w = Withdrawal.query.filter_by(id=wid).with_for_update().first_or_404()
     if w.status == "PENDING":
         w.status = "PAID"
         w.processed_at = datetime.utcnow()
         db.session.commit()
-        
+        audit("withdrawal_paid", withdrawal=wid, amount=w.amount, shop=w.shop_id)
         send_email(
-            w.shop.owner.email,
-            f"💰 Payout Processed - ₦{w.amount:,.2f}",
-            f"""
-            <h2>Good news!</h2>
-            <p>Hi {w.shop.name},</p>
-            <p>Your withdrawal request of <b>₦{w.amount:,.2f}</b> has been successfully processed and sent to your bank account:</p>
-            <p><b>Bank:</b> {w.bank_name}<br>
-            <b>Account:</b> {w.account_number}</p>
-            <p>Thank you for doing business with us!</p>
-            """
+            w.shop.owner.email, f"Payout Processed - ₦{w.amount:,.2f}",
+            f"<h2>Good news!</h2><p>Hi {escape(w.shop.name)},</p>"
+            f"<p>Your withdrawal of <b>₦{w.amount:,.2f}</b> has been processed:</p>"
+            f"<p><b>Bank:</b> {escape(w.bank_name)}<br><b>Account:</b> {escape(w.account_number)}</p>",
         )
-        
         flash("Withdrawal marked as Paid.", "success")
     return redirect(url_for("admin_withdrawals"))
 
+
 @app.route("/admin/withdrawals/<int:wid>/reject", methods=["POST"])
-@login_required
+@admin_required
 def admin_reject_withdrawal(wid):
-    if current_user.role != "admin": return "Forbidden", 403
-    w = Withdrawal.query.get_or_404(wid)
+    w = Withdrawal.query.filter_by(id=wid).with_for_update().first_or_404()
     if w.status == "PENDING":
         w.status = "REJECTED"
         w.processed_at = datetime.utcnow()
-        w.shop.wallet_balance += w.amount
+        Shop.query.filter_by(id=w.shop_id).update(
+            {Shop.wallet_balance: Shop.wallet_balance + w.amount}, synchronize_session=False)
         db.session.commit()
+        audit("withdrawal_rejected", withdrawal=wid, shop=w.shop_id)
         flash("Withdrawal rejected and funds returned to vendor.", "success")
     return redirect(url_for("admin_withdrawals"))
 
+
 # ==================================================================
-# ADMIN MASTER DASHBOARD & OTHERS
+# ADMIN
 # ==================================================================
 @app.route("/admin")
-@login_required
+@admin_required
 def admin_dashboard():
-    if current_user.role != "admin": return redirect(url_for("home"))
-    
-    active_shops = Shop.query.filter(Shop.activation_paid == True).count()
+    active_shops = Shop.query.filter(Shop.activation_paid == True).count()  # noqa: E712
+    delivered = OrderItem.query.filter_by(status="DELIVERED").all()
+    commission = sum(i.price * i.qty * PLATFORM_COMMISSION for i in delivered)
     sub_revenue = active_shops * ACTIVATION_FEE_NGN
-    delivered_items = OrderItem.query.filter_by(status="DELIVERED").all()
-    commission_revenue = sum((item.price * item.qty) * PLATFORM_COMMISSION for item in delivered_items)
-    
-    # Reel Promo Revenue
-    paid_reels = Reel.query.filter_by(is_sponsored=True).count()
-    reel_revenue = paid_reels * REEL_PROMO_FEE_NGN
-
+    reel_revenue = Reel.query.filter_by(is_sponsored=True).count() * REEL_PROMO_FEE_NGN
     stats = {
-        "sub_revenue": sub_revenue,
-        "commission_revenue": commission_revenue,
-        "reel_revenue": reel_revenue,
-        "total_revenue": sub_revenue + commission_revenue + reel_revenue,
+        "sub_revenue": sub_revenue, "commission_revenue": commission, "reel_revenue": reel_revenue,
+        "total_revenue": sub_revenue + commission + reel_revenue,
         "pending_apps": Shop.query.filter_by(verification_status="PENDING_REVIEW").count(),
         "pending_payouts": Withdrawal.query.filter_by(status="PENDING").count(),
-        "total_users": User.query.count(),
-        "total_orders": Order.query.count(),
-        "total_products": Product.query.count(),
-        "active_shops": active_shops
+        "total_users": User.query.count(), "total_orders": Order.query.count(),
+        "total_products": Product.query.count(), "active_shops": active_shops,
     }
     return render_template("admin_dashboard.html", stats=stats)
 
+
 @app.route("/admin/applications")
-@login_required
+@admin_required
 def admin_applications():
-    if current_user.role != "admin": return redirect(url_for("home"))
-    return render_template("admin_applications.html", 
+    return render_template(
+        "admin_applications.html",
         pending=Shop.query.filter_by(verification_status="PENDING_REVIEW").all(),
         approved=Shop.query.filter_by(verification_status="APPROVED").all(),
         rejected=Shop.query.filter_by(verification_status="REJECTED").all(),
         active=Shop.query.filter_by(verification_status="ACTIVE").all())
 
+
 @app.route("/admin/applications/<int:sid>/approve", methods=["POST"])
-@login_required
+@admin_required
 def admin_approve(sid):
-    if current_user.role != "admin": return "Forbidden", 403
-    shop = Shop.query.get_or_404(sid)
+    shop = Shop.query.filter_by(id=sid).with_for_update().first_or_404()
+    if shop.verification_status != "PENDING_REVIEW":
+        flash("That application is not awaiting review.", "error")
+        return redirect(url_for("admin_applications"))
     shop.verification_status = "APPROVED"
     shop.reviewed_at = datetime.utcnow()
     db.session.commit()
-    
+    audit("shop_approved", shop=sid)
     send_email(
-        shop.owner.email,
-        "🎉 Your Mall Application is Approved!",
-        f"""
-        <h2>Welcome to the Mall!</h2>
-        <p>Hi {shop.owner.username},</p>
-        <p>Your shop <b>{shop.name}</b> has been reviewed and approved.</p>
-        <p>To start selling, please log in and pay the one-time activation fee of ₦10,000 to make your shop live.</p>
-        <br>
-        <p><a href="https://your-render-url.onrender.com/dashboard">Click here to log in and activate your shop.</a></p>
-        """
+        shop.owner.email, "Your Mall Application is Approved!",
+        f"<h2>Welcome to the Mall!</h2><p>Hi {escape(shop.owner.username)},</p>"
+        f"<p>Your shop <b>{escape(shop.name)}</b> has been reviewed and approved.</p>"
+        f"<p>To start selling, log in and pay the activation fee of ₦{ACTIVATION_FEE_NGN:,} to make your shop live.</p>"
+        f"<p><a href=\"{escape(url_for('dashboard', _external=True))}\">Log in and activate your shop.</a></p>",
     )
-    
     flash(f"{shop.name} approved.", "success")
     return redirect(url_for("admin_applications"))
 
+
 @app.route("/admin/applications/<int:sid>/reject", methods=["POST"])
-@login_required
+@admin_required
 def admin_reject(sid):
-    if current_user.role != "admin": return "Forbidden", 403
-    shop = Shop.query.get_or_404(sid)
+    shop = Shop.query.filter_by(id=sid).with_for_update().first_or_404()
+    if shop.verification_status not in ("PENDING_REVIEW", "APPROVED"):
+        flash("That application can't be rejected in its current state.", "error")
+        return redirect(url_for("admin_applications"))
     shop.verification_status = "REJECTED"
-    shop.rejection_reason = request.form.get("reason", "Invalid details.")
+    shop.rejection_reason = clip_text(request.form.get("reason"), 500) or "Invalid details."
     shop.reviewed_at = datetime.utcnow()
     db.session.commit()
-    
+    audit("shop_rejected", shop=sid)
     send_email(
-        shop.owner.email,
-        "Update on your Mall Application",
-        f"""
-        <h2>Application Status Update</h2>
-        <p>Hi {shop.owner.username},</p>
-        <p>Unfortunately, your application for <b>{shop.name}</b> was not approved at this time.</p>
-        <p><b>Reason:</b> {shop.rejection_reason}</p>
-        <p>You can log in to review this and submit a new application if you wish.</p>
-        """
+        shop.owner.email, "Update on your Mall Application",
+        f"<h2>Application Status Update</h2><p>Hi {escape(shop.owner.username)},</p>"
+        f"<p>Your application for <b>{escape(shop.name)}</b> was not approved at this time.</p>"
+        f"<p><b>Reason:</b> {escape(shop.rejection_reason)}</p>"
+        f"<p>You can log in to review this and submit a new application.</p>",
     )
-    
     flash("Shop rejected.", "success")
     return redirect(url_for("admin_applications"))
 
+
 @app.route("/admin/reels")
-@login_required
+@admin_required
 def admin_reels():
-    if current_user.role != "admin": return redirect(url_for("home"))
-    pending  = Reel.query.filter_by(is_approved=False).order_by(Reel.created_at.desc()).all()
+    pending = Reel.query.filter_by(is_approved=False).order_by(Reel.created_at.desc()).all()
     approved = Reel.query.filter_by(is_approved=True).order_by(Reel.created_at.desc()).all()
     return render_template("admin_reels.html", pending=pending, approved=approved)
 
+
 @app.route("/admin/reels/<int:rid>/approve", methods=["POST"])
-@login_required
+@admin_required
 def admin_approve_reel(rid):
-    if current_user.role != "admin": return "Forbidden", 403
-    r = Reel.query.get_or_404(rid); r.is_approved = True
-    db.session.commit(); flash("Reel approved.", "success")
+    r = Reel.query.get_or_404(rid)
+    r.is_approved = True
+    db.session.commit()
+    audit("reel_approved", reel=rid)
+    flash("Reel approved.", "success")
     return redirect(url_for("admin_reels"))
 
+
 @app.route("/admin/reels/<int:rid>/reject", methods=["POST"])
-@login_required
+@admin_required
 def admin_reject_reel(rid):
-    if current_user.role != "admin": return "Forbidden", 403
-    r = Reel.query.get_or_404(rid); db.session.delete(r); db.session.commit()
+    r = Reel.query.get_or_404(rid)
+    ReelLike.query.filter_by(reel_id=r.id).delete()
+    db.session.delete(r)
+    db.session.commit()
+    audit("reel_removed", reel=rid)
     flash("Reel removed.", "success")
     return redirect(url_for("admin_reels"))
 
+
 # ==================================================================
-# DEV UTILITIES
+# CLI (replaces the old public /seed and /admin/create URLs)
 # ==================================================================
-@app.route("/seed")
-def seed():
-    if Shop.query.count() > 0: return "Already seeded."
+@app.cli.command("create-admin")
+@click.option("--email", prompt=True)
+@click.option("--username", default="Admin", show_default=True)
+@click.password_option(confirmation_prompt=True)
+def create_admin(email, username, password):
+    """Create an admin account:  flask --app app create-admin"""
+    email = email.strip().lower()
+    if not EMAIL_RE.match(email) or len(password) < 12:
+        raise click.ClickException("Use a valid email and a password of at least 12 characters.")
+    if User.query.filter_by(email=email).first():
+        raise click.ClickException("A user with that email already exists.")
+    db.session.add(User(username=username, email=email, role="admin",
+                        password_hash=generate_password_hash(password)))
+    db.session.commit()
+    click.echo(f"Admin {email} created.")
+
+
+@app.cli.command("seed-demo")
+@click.option("--force", is_flag=True, help="Allow in production (not recommended).")
+def seed_demo(force):
+    """Create demo shops with random passwords (development only)."""
+    if IS_PROD and not force:
+        raise click.ClickException("Refusing to seed demo data in production.")
+    if Shop.query.count() > 0:
+        raise click.ClickException("Already seeded.")
     demo = [("Royal Collections", "Watches", 189.0), ("Fashion House", "Fashion", 49.0), ("Tech World", "Electronics", 299.0)]
     for name, cat, base_price in demo:
+        pw = secrets.token_urlsafe(12)
         email = name.lower().replace(" ", "") + "@mall.test"
-        vendor = User(username=name, email=email, password_hash=generate_password_hash("demo123"), role="vendor")
-        db.session.add(vendor); db.session.flush()
+        vendor = User(username=name, email=email, password_hash=generate_password_hash(pw), role="vendor")
+        db.session.add(vendor)
+        db.session.flush()
         shop = Shop(owner_id=vendor.id, name=name, slug=slugify(name), category=cat, description="Demo shop.",
                     verification_status="ACTIVE", activation_paid=True, subscription_status="ACTIVE",
-                    subscription_expires_at=datetime.utcnow()+timedelta(days=30), is_approved=True)
-        db.session.add(shop); db.session.flush()
+                    subscription_expires_at=datetime.utcnow() + timedelta(days=30), is_approved=True)
+        db.session.add(shop)
+        db.session.flush()
         for i in range(1, 4):
-            db.session.add(Product(shop_id=shop.id, name=f"{name} Item {i}", price=base_price*i, stock=10))
-    db.session.commit(); return "Seeded."
+            db.session.add(Product(shop_id=shop.id, name=f"{name} Item {i}", price=base_price * i, stock=10))
+        click.echo(f"{email}  /  {pw}")
+    db.session.commit()
 
-@app.route("/admin/create")
-def admin_create():
-    if User.query.filter_by(email="admin@mall.test").first(): return "Admin exists."
-    db.session.add(User(username="Admin", email="admin@mall.test", password_hash=generate_password_hash("admin123"), role="admin"))
-    db.session.commit(); return "Admin created."
 
 with app.app_context():
     db.create_all()
 
 if __name__ == "__main__":
-    socketio.run(app, debug=True, host="0.0.0.0", port=5000, allow_unsafe_werkzeug=True)
+    dev = APP_ENV == "development"
+    socketio.run(app, debug=dev, host="127.0.0.1" if dev else "0.0.0.0",
+                 port=int(os.environ.get("PORT", 5000)), allow_unsafe_werkzeug=dev)

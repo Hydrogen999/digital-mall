@@ -26,15 +26,13 @@
     </div>
 
     <form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button class="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-semibold">
         Pay ₦{{ "{:,}".format(fee) }} and activate
       </button>
     </form>
 
-    <p class="text-xs text-slate-400 text-center mt-4">
-      🔒 In production, this button will open a Paystack / Stripe checkout.
-      For now, clicking it marks the payment as complete so you can test the flow.
-    </p>
+    <p class="text-xs text-slate-400 text-center mt-4">🔒 Secure payment by Paystack. Your shop goes live as soon as the payment is confirmed.</p>
   </div>
 </div>
 {% endblock %}

@@ -5,6 +5,7 @@
   <p class="text-slate-500 mb-6">You're one step away from owning a storefront in the mall.</p>
   <form method="POST" action="/vendor/shop/create" enctype="multipart/form-data"
         class="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input name="name" required placeholder="Business name (e.g. Royal Collections)"
            class="w-full px-3 py-2 border rounded-lg">
     <input name="category" required placeholder="Category (e.g. Watches, Fashion, Electronics)"

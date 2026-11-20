@@ -52,12 +52,12 @@ class Shop(db.Model):
     activation_ref = db.Column(db.String(40))
     subscription_status = db.Column(db.String(20), default="INACTIVE")
     subscription_expires_at = db.Column(db.DateTime)
-    
+
     # Analytics & Wallet
     is_approved = db.Column(db.Boolean, default=False)
     views = db.Column(db.Integer, default=0)
     wallet_balance = db.Column(db.Float, default=0.0)
-    
+
     submitted_at = db.Column(db.DateTime, default=datetime.utcnow)
     reviewed_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -77,7 +77,7 @@ class Product(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     views = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
+
     reviews = db.relationship("Review", backref="product", lazy=True, cascade="all, delete")
 
 
@@ -86,6 +86,9 @@ class Conversation(db.Model):
     customer_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     shop_id = db.Column(db.Integer, db.ForeignKey("shop.id"), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    shop = db.relationship("Shop")        # <-- NEW (chat code uses conv.shop)
+    customer = db.relationship("User")    # <-- NEW
 
     messages = db.relationship("Message", backref="conversation", lazy=True,
                                cascade="all, delete", order_by="Message.created_at")
@@ -112,6 +115,7 @@ class Order(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     items = db.relationship("OrderItem", backref="order", cascade="all, delete")
+    customer = db.relationship("User")    # <-- NEW (fixes the AttributeError after payment)
 
 
 class OrderItem(db.Model):
@@ -122,9 +126,9 @@ class OrderItem(db.Model):
     name = db.Column(db.String(200))
     price = db.Column(db.Float)
     qty = db.Column(db.Integer, default=1)
-    
+
     # Status Flow: PAID -> SHIPPED -> DELIVERED (Funds Released)
-    status = db.Column(db.String(20), default="PAID") 
+    status = db.Column(db.String(20), default="PAID")
 
     shop = db.relationship("Shop")
     product = db.relationship("Product")
@@ -175,8 +179,19 @@ class Withdrawal(db.Model):
     bank_name = db.Column(db.String(100))
     account_name = db.Column(db.String(100))
     account_number = db.Column(db.String(20))
-    status = db.Column(db.String(20), default="PENDING") # PENDING | PAID | REJECTED
+    status = db.Column(db.String(20), default="PENDING")  # PENDING | PAID | REJECTED
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     processed_at = db.Column(db.DateTime)
 
     shop = db.relationship("Shop")
+
+
+class ReelLike(db.Model):
+    """One like per user per reel (stops like-count inflation)."""
+    __tablename__ = "reel_like"
+    __table_args__ = (db.UniqueConstraint("reel_id", "user_id", name="uq_reel_like"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    reel_id = db.Column(db.Integer, db.ForeignKey("reel.id"), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

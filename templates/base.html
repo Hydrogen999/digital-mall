@@ -3,37 +3,52 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
   <title>{% block title %}Mall{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script>
+  <script nonce="{{ csp_nonce }}">
     tailwind.config = { theme: { extend: { colors: { brand: { DEFAULT: '#0f172a', accent: '#f59e0b' } } } } }
   </script>
+  <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
 </head>
 <body class="bg-slate-50 text-slate-900 antialiased">
   <header class="sticky top-0 z-40 backdrop-blur bg-white/80 border-b border-slate-200">
     <div class="max-w-7xl mx-auto px-4 h-16 flex items-center gap-4">
       <a href="/" class="text-xl font-black tracking-tight">MALL<span class="text-amber-500">.</span></a>
       <form class="flex-1 max-w-xl" action="/search" method="GET">
-        <input name="q" placeholder="Search shops, brands, products…" class="w-full px-4 py-2 rounded-full border border-slate-200 bg-slate-100 focus:bg-white focus:ring-2 focus:ring-amber-400 outline-none">
+        <input name="q" maxlength="100" placeholder="Search shops, brands, products…" class="w-full px-4 py-2 rounded-full border border-slate-200 bg-slate-100 focus:bg-white focus:ring-2 focus:ring-amber-400 outline-none">
       </form>
       {% if current_user.is_authenticated %}
-       {% if current_user.role == 'admin' %}
-  <a href="/admin" class="text-sm font-bold text-amber-600 hover:text-amber-700">Admin Panel</a>
-{% endif %}
+        {% if current_user.role == 'admin' %}
+          <a href="/admin" class="text-sm font-bold text-amber-600 hover:text-amber-700">Admin Panel</a>
+        {% endif %}
         <a href="/wishlist" class="text-sm font-medium">Wishlist</a>
         <a href="/dashboard" class="text-sm font-medium">Dashboard</a>
-        <a href="/logout" class="text-sm text-slate-500">Logout</a>
+        <form method="POST" action="/logout" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="text-sm text-slate-500 hover:text-slate-800">Logout</button>
+        </form>
       {% else %}
         <a href="/login" class="text-sm font-medium">Login</a>
       {% endif %}
       <a href="/cart" class="text-sm font-medium relative">Cart</a>
     </div>
   </header>
-  
+
+  {# Flash messages are rendered once, here, for every page #}
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% if msgs %}
+      <div class="max-w-3xl mx-auto px-4 pt-4" role="status">
+        {% for cat, msg in msgs %}
+          <div class="mb-2 rounded-xl p-3 text-sm {{ 'bg-green-50 text-green-700 border border-green-200' if cat=='success' else 'bg-red-50 text-red-700 border border-red-200' }}">{{ msg }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
   <main>{% block content %}{% endblock %}</main>
 
-  <!-- THIS WAS MISSING: It loads the JavaScript for all pages -->
   {% block scripts %}{% endblock %}
-
 </body>
 </html>

@@ -13,26 +13,10 @@
     <p class="mt-6 text-slate-600">{{ p.description }}</p>
 
     <div class="mt-8 flex gap-3">
-      <button onclick='addToCart({{ {"id":p.id,"name":p.name,"price":p.price,"image":p.image}|tojson }})' class="flex-1 py-3 bg-amber-500 text-white rounded-lg font-bold hover:bg-amber-600">Add to Cart</button>
-      <button onclick="toggleWishlist({{ p.id }})" id="wish-btn" class="px-5 py-3 border rounded-lg text-xl hover:bg-slate-50">🤍</button>
+      <button data-add-to-cart='{{ {"id":p.id,"name":p.name,"price":p.price,"image":p.image}|tojson }}' class="flex-1 py-3 bg-amber-500 text-white rounded-lg font-bold hover:bg-amber-600">Add to Cart</button>
+      <button data-wishlist="{{ p.id }}" id="wish-btn" class="px-5 py-3 border rounded-lg text-xl hover:bg-slate-50">🤍</button>
     </div>
   </div>
 </div>
 
-<script>
-  function addToCart(item) {
-    let cart = JSON.parse(localStorage.getItem("mall_cart") || "[]");
-    let found = cart.find(i => i.id === item.id);
-    if (found) found.qty += 1; else cart.push({ ...item, qty: 1 });
-    localStorage.setItem("mall_cart", JSON.stringify(cart));
-    alert("Added to cart!");
-  }
-  
-  async function toggleWishlist(id) {
-    const res = await fetch(`/wishlist/toggle/${id}`, { method: 'POST' });
-    if (res.status === 401) { location.href = '/login'; return; }
-    const data = await res.json();
-    document.getElementById('wish-btn').innerText = data.saved ? '❤️' : '🤍';
-  }
-</script>
 {% endblock %}

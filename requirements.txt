@@ -1,13 +1,17 @@
-Flask==3.0.0
-Flask-SQLAlchemy==3.1.1
+# Lower bounds are the first releases that fix known security issues
+# (Flask session-header bug, requests credential leak, gunicorn/eventlet request smuggling, etc.).
+# Test in staging after upgrading, then run:  pip install pip-audit && pip-audit -r requirements.txt
+Flask>=3.1.1,<4
+Werkzeug>=3.1.3,<4
+Flask-SQLAlchemy>=3.1.1,<4
+SQLAlchemy>=2.0,<3
 Flask-Login==0.6.3
-Flask-SocketIO==5.3.6
-Werkzeug==3.0.1
-Pillow==12.0.0
-python-dotenv==1.0.0
-requests==2.31.0
-gunicorn==21.2.0
-eventlet==0.35.1
-psycopg2-binary==2.9.9
-Flask-Mail==0.9.1
-cloudinary==1.39.0
+Flask-SocketIO>=5.5.1,<6
+Flask-Mail>=0.10.0,<1
+Pillow>=12.0.0
+python-dotenv>=1.0.1,<2
+requests>=2.32.4,<3
+gunicorn>=23.0.0,<24
+eventlet>=0.40.3,<1
+psycopg2-binary>=2.9.9,<3
+cloudinary>=1.41.0,<2

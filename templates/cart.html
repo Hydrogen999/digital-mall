@@ -17,11 +17,11 @@
       <form id="checkout-form" class="space-y-4">
         <div>
           <label class="text-sm font-medium">Delivery Address</label>
-          <input name="address" required placeholder="Enter your full address" class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
+          <input name="address" required minlength="8" maxlength="300" placeholder="Enter your full address" class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
         </div>
         <div>
           <label class="text-sm font-medium">Phone Number</label>
-          <input name="phone" required placeholder="08012345678" class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
+          <input name="phone" required maxlength="20" inputmode="tel" placeholder="08012345678" class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
         </div>
         <button type="submit" id="pay-btn" class="w-full py-4 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-lg shadow-lg transition">
           Pay with Paystack
@@ -39,42 +39,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
-    document.getElementById("checkout-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const btn = document.getElementById("pay-btn");
-    btn.innerText = "Connecting to Paystack...";
-    btn.disabled = true;
-
-    const fd = new FormData(e.target);
-    const payload = {
-      items: cart.map(i => ({ product_id: i.id, qty: i.qty })),
-      address: fd.get("address"),
-      phone: fd.get("phone")
-    };
-
-    try {
-      const res = await fetch("/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      
-      const data = await res.json();
-      
-      if (res.ok && data.authorization_url) {
-        localStorage.removeItem(KEY); // Clear cart
-        window.location.href = data.authorization_url; // Send to Paystack
-      } else {
-        alert(data.error || "Something went wrong");
-        btn.innerText = "Pay with Paystack";
-        btn.disabled = false;
-      }
-    } catch (err) {
-      alert("Server is busy. Please try again.");
-      btn.innerText = "Pay with Paystack";
-      btn.disabled = false;
-    }
-  });
-</script>
+<script src="{{ url_for('static', filename='js/cart.js') }}" defer></script>
 {% endblock %}

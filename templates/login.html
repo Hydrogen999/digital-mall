@@ -8,14 +8,6 @@
     <p class="text-slate-500 text-sm mt-2">Sign in or create an account to start shopping.</p>
   </div>
 
-  {% with msgs = get_flashed_messages(with_categories=true) %}
-    {% for cat, msg in msgs %}
-      <div class="mb-4 rounded-xl p-3 text-sm
-        {{ 'bg-red-50 text-red-700 border border-red-200' if cat == 'error' else 'bg-green-50 text-green-700 border border-green-200' }}">
-        {{ msg }}
-      </div>
-    {% endfor %}
-  {% endwith %}
 
   <!-- Tabs -->
   <div class="flex bg-slate-100 p-1 rounded-xl mb-4">
@@ -26,6 +18,7 @@
   <!-- LOGIN form -->
   <form data-panel="login" method="POST" action="/login"
         class="auth-panel bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div>
       <label class="text-sm font-medium">Email</label>
       <input name="email" type="email" required
@@ -33,7 +26,7 @@
     </div>
     <div>
       <label class="text-sm font-medium">Password</label>
-      <input name="password" type="password" required
+      <input name="password" type="password" required maxlength="256" autocomplete="current-password"
              class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
     </div>
     <button class="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-semibold">
@@ -44,6 +37,7 @@
   <!-- REGISTER form -->
   <form data-panel="register" method="POST" action="/register"
         class="auth-panel hidden bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div>
       <label class="text-sm font-medium">Full name</label>
       <input name="username" required
@@ -56,7 +50,7 @@
     </div>
     <div>
       <label class="text-sm font-medium">Password</label>
-      <input name="password" type="password" required minlength="6"
+      <input name="password" type="password" required minlength="10" maxlength="128" autocomplete="new-password"
              class="w-full mt-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
     </div>
     <div>
@@ -77,7 +71,7 @@
 
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
   document.querySelectorAll(".auth-tab").forEach(tab => {
     tab.addEventListener("click", () => {
       document.querySelectorAll(".auth-tab").forEach(t => {

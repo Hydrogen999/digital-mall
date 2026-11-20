@@ -10,12 +10,6 @@
     </div>
   </div>
 
-  {% with msgs = get_flashed_messages(with_categories=true) %}
-    {% for cat, msg in msgs %}
-      <div class="mb-4 rounded-xl p-3 text-sm
-        {{ 'bg-red-50 text-red-700 border border-red-200' if cat=='error' else 'bg-green-50 text-green-700 border border-green-200' }}">{{ msg }}</div>
-    {% endfor %}
-  {% endwith %}
 
   <h2 class="text-lg font-bold mb-3">Pending review ({{ pending|length }})</h2>
   <div class="space-y-4 mb-10">
@@ -55,7 +49,7 @@
           <p class="mt-2 text-sm">
             <b>Social links:</b>
             {% for l in s.social_links|from_json %}
-              <a href="{{ l }}" target="_blank" class="text-amber-600 underline mr-2">{{ l }}</a>
+              {% set u = l|safe_url %}{% if u %}<a href="{{ u }}" target="_blank" rel="noopener noreferrer nofollow" class="text-amber-600 underline mr-2">{{ u }}</a>{% else %}<span class="text-slate-400 mr-2">[invalid link hidden]</span>{% endif %}
             {% endfor %}
           </p>
         {% endif %}
@@ -63,8 +57,8 @@
         {% if s.id_image %}
           <div class="mt-3">
             <p class="text-sm text-slate-500 mb-1">ID document:</p>
-            <a href="{{ s.id_image }}" target="_blank">
-              <img src="{{ s.id_image }}" class="h-32 rounded-lg border">
+            <a href="{{ s.id_image|kyc_url }}" target="_blank" rel="noopener noreferrer">
+              <img src="{{ s.id_image|kyc_url }}" class="h-32 rounded-lg border" referrerpolicy="no-referrer">
             </a>
           </div>
         {% endif %}
@@ -84,10 +78,12 @@
 
         <div class="flex gap-2 mt-4">
           <form method="POST" action="{{ url_for('admin_approve', sid=s.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold">✓ Approve</button>
           </form>
           <form method="POST" action="{{ url_for('admin_reject', sid=s.id) }}"
-                onsubmit="return promptForReason(this)">
+                data-prompt-reason>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="reason">
             <button class="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold">✗ Reject</button>
           </form>
@@ -135,12 +131,4 @@
   {% endif %}
 </div>
 
-<script>
-  function promptForReason(form) {
-    const reason = prompt("Reason for rejecting this application:");
-    if (!reason || reason.trim().length < 5) return false;
-    form.reason.value = reason.trim();
-    return true;
-  }
-</script>
 {% endblock %}

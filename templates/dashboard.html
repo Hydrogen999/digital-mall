@@ -21,7 +21,7 @@
       <div class="text-xs text-slate-500 font-medium">Wallet Balance</div>
       <div class="text-2xl font-bold text-emerald-600 mt-1">₦{{ "{:,.2f}".format(shop.wallet_balance) }}</div>
       {% if shop.wallet_balance > 0 %}
-        <button onclick="document.getElementById('withdraw-modal').showModal()" 
+        <button data-dialog-open="withdraw-modal" 
                 class="absolute bottom-4 right-4 text-xs bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg transition font-semibold">
           Withdraw
         </button>
@@ -66,7 +66,7 @@
       <div data-panel="products" class="panel bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
         <div class="flex items-center justify-between mb-4">
           <h2 class="text-lg font-bold">Products</h2>
-          <button onclick="document.getElementById('add-prod').showModal()" class="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold transition">+ Add Product</button>
+          <button data-dialog-open="add-prod" class="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold transition">+ Add Product</button>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
           {% for p in products %}
@@ -109,6 +109,7 @@
                   <td class="px-2 text-right">
                     {% if i.status == 'PAID' %}
                       <form method="POST" action="/vendor/ship/{{ i.id }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button class="text-xs bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded-lg transition">Mark Shipped</button>
                       </form>
                     {% elif i.status == 'SHIPPED' %}
@@ -151,7 +152,7 @@
             <h2 class="text-lg font-bold">Promotional Reels</h2>
             <p class="text-xs text-slate-500 mt-1">Upload a video to show on the main feed. Requires a ₦10,000 promotion fee.</p>
           </div>
-          <button onclick="document.getElementById('new-reel').showModal()" class="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold transition">
+          <button data-dialog-open="new-reel" class="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold transition">
             + Promote Video
           </button>
         </div>
@@ -186,6 +187,7 @@
 <!-- Add Product Modal -->
 <dialog id="add-prod" class="rounded-2xl p-6 w-full max-w-md backdrop:bg-black/50 shadow-2xl">
   <form method="POST" action="/vendor/product/add" enctype="multipart/form-data" class="space-y-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <h3 class="text-xl font-black">Add a product</h3>
     <input name="name" required placeholder="Product name" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
     <textarea name="description" placeholder="Description" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none" rows="3"></textarea>
@@ -195,7 +197,7 @@
     </div>
     <input name="image" type="file" accept="image/*" class="text-sm block w-full text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100">
     <div class="flex justify-end gap-2 pt-2 border-t mt-2">
-      <button type="button" onclick="this.closest('dialog').close()" class="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">Cancel</button>
+      <button type="button" data-dialog-close class="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">Cancel</button>
       <button class="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-bold shadow-lg">Save Product</button>
     </div>
   </form>
@@ -222,7 +224,7 @@
     <textarea name="caption" placeholder="Caption (e.g. New watch collection just landed)" rows="2" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none"></textarea>
     
     <div class="flex justify-end gap-2 pt-2 border-t mt-2">
-      <button type="button" onclick="this.closest('dialog').close()" class="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">Cancel</button>
+      <button type="button" data-dialog-close class="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">Cancel</button>
       <button type="submit" id="reel-submit-btn" class="px-5 py-2 bg-slate-900 hover:bg-black text-white rounded-lg text-sm font-bold shadow-lg transition flex items-center gap-2">
         Pay ₦10,000 & Submit
       </button>
@@ -233,6 +235,7 @@
 <!-- Withdraw Modal -->
 <dialog id="withdraw-modal" class="rounded-2xl p-6 w-full max-w-md backdrop:bg-black/50 shadow-2xl">
   <form method="POST" action="/vendor/withdraw" class="space-y-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <h3 class="text-xl font-black">Withdraw Funds</h3>
     <p class="text-sm text-slate-500 mb-2">Available Balance: <b class="text-emerald-600">₦{{ "{:,.2f}".format(shop.wallet_balance) }}</b></p>
     
@@ -242,7 +245,7 @@
     <input name="account_name" required placeholder="Account Name" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-400 outline-none">
     
     <div class="flex justify-end gap-2 pt-2 border-t mt-2">
-      <button type="button" onclick="this.closest('dialog').close()" class="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">Cancel</button>
+      <button type="button" data-dialog-close class="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">Cancel</button>
       <button class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-bold shadow-lg">Request Payout</button>
     </div>
   </form>
@@ -251,7 +254,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
   // 1. Handle Tab Switching
   document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.addEventListener("click", () => {

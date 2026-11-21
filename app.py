@@ -456,8 +456,10 @@ app.before_request(csrf_protect)
 _last_maintenance = 0.0
 
 
+s
 @app.before_request
 def maintenance():
+    """Expire subscriptions, release stock, and auto-release escrow (runs once a minute)."""
     global _last_maintenance
     if request.endpoint in ("static", "paystack_webhook"):
         return
@@ -465,16 +467,40 @@ def maintenance():
     if now_m - _last_maintenance < 60:
         return
     _last_maintenance = now_m
+    
     try:
         now = datetime.utcnow()
+        
+        # 1. Expire Subscriptions
         for shop in Shop.query.filter(Shop.subscription_status == "ACTIVE", Shop.subscription_expires_at < now).all():
             shop.subscription_status = "EXPIRED"
             shop.is_approved = False
+            
+        # 2. Restock abandoned checkouts (2 hours)
         stale = Order.query.filter(Order.status == "PENDING", Order.created_at < now - PENDING_ORDER_TTL) \
             .with_for_update(skip_locked=True).all()
         for order in stale:
             restock_order(order)
+            
+        # 3. Auto-Release Escrow (7 days after shipping)
+        # If an item was shipped more than 7 days ago, auto-mark as DELIVERED and pay the vendor.
+        seven_days_ago = now - timedelta(days=7)
+        old_shipped_items = OrderItem.query.filter(
+            OrderItem.status == "SHIPPED",
+            Order.created_at < seven_days_ago
+        ).all()
+        
+        for item in old_shipped_items:
+            item.status = "DELIVERED"
+            # Release funds to vendor
+            payout = round(item.price * item.qty * (1 - PLATFORM_COMMISSION), 2)
+            Shop.query.filter_by(id=item.shop_id).update(
+                {Shop.wallet_balance: Shop.wallet_balance + payout}, synchronize_session=False
+            )
+            log.info(f"Auto-released escrow for item {item.id} (Order {item.order.reference})")
+            
         db.session.commit()
+        
     except Exception:
         db.session.rollback()
         log.exception("Maintenance failed")

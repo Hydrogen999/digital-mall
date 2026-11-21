@@ -1,134 +1,131 @@
 {% extends "base.html" %}
-{% block title %}Vendor applications · Admin{% endblock %}
+{% block title %}Vendor Applications · Admin{% endblock %}
+
 {% block content %}
- <div class="flex items-center justify-between mb-6">
-  <h1 class="text-3xl font-black">Vendor Applications</h1>
-  <a href="{{ url_for('admin_dashboard') }}" class="text-sm text-slate-500 hover:underline">← Back to Dashboard</a>
-</div>
-      <a href="{{ url_for('admin_withdrawals') }}" class="text-sm text-emerald-600 font-semibold hover:underline">Manage Payouts →</a>
-      <a href="{{ url_for('admin_reels') }}" class="text-sm text-amber-600 font-semibold hover:underline">Moderate Reels →</a>
-    </div>
-  </div>
-
-
-  <h2 class="text-lg font-bold mb-3">Pending review ({{ pending|length }})</h2>
-  <div class="space-y-4 mb-10">
-    {% for s in pending %}
-      {% set flags = s.auto_flags|from_json if s.auto_flags else [] %}
-      <div class="bg-white rounded-2xl border border-slate-200 p-5">
-        <div class="flex justify-between items-start flex-wrap gap-2">
-          <div>
-            <h3 class="text-lg font-bold">{{ s.name }}</h3>
-            <p class="text-sm text-slate-500">
-              {{ s.category }} · {{ s.seller_type|capitalize }} · submitted {{ s.submitted_at.strftime("%d %b, %H:%M") if s.submitted_at else "—" }}
-            </p>
-          </div>
-          <span class="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-700 font-semibold">PENDING</span>
-        </div>
-
-        <div class="grid md:grid-cols-2 gap-4 mt-4 text-sm">
-          <div class="space-y-1">
-            <p><span class="text-slate-500">Legal name:</span> {{ s.legal_name or "—" }}</p>
-            <p><span class="text-slate-500">Phone:</span> {{ s.phone or "—" }}</p>
-            <p><span class="text-slate-500">Email:</span> {{ s.business_email or "—" }}</p>
-            <p><span class="text-slate-500">Address:</span> {{ s.address }}, {{ s.city }}, {{ s.state }}</p>
-          </div>
-          <div class="space-y-1">
-            <p><span class="text-slate-500">CAC/RC:</span> {{ s.cac_number or "— (individual)" }}</p>
-            <p><span class="text-slate-500">ID:</span> {{ s.id_type }} — {{ s.id_number }}</p>
-            <p><span class="text-slate-500">Price range:</span> {{ s.price_range or "—" }}</p>
-            <p><span class="text-slate-500">Products:</span> {{ s.product_summary or "—" }}</p>
-          </div>
-        </div>
-
-        {% if s.description %}
-          <p class="mt-3 text-sm text-slate-600"><b>Description:</b> {{ s.description }}</p>
-        {% endif %}
-
-        {% if s.social_links %}
-          <p class="mt-2 text-sm">
-            <b>Social links:</b>
-            {% for l in s.social_links|from_json %}
-              {% set u = l|safe_url %}{% if u %}<a href="{{ u }}" target="_blank" rel="noopener noreferrer nofollow" class="text-amber-600 underline mr-2">{{ u }}</a>{% else %}<span class="text-slate-400 mr-2">[invalid link hidden]</span>{% endif %}
-            {% endfor %}
-          </p>
-        {% endif %}
-
-        {% if s.id_image %}
-          <div class="mt-3">
-            <p class="text-sm text-slate-500 mb-1">ID document:</p>
-            <a href="{{ s.id_image|kyc_url }}" target="_blank" rel="noopener noreferrer">
-              <img src="{{ s.id_image|kyc_url }}" class="h-32 rounded-lg border" referrerpolicy="no-referrer">
-            </a>
-          </div>
-        {% endif %}
-
-        {% if flags %}
-          <div class="mt-3 rounded-xl bg-red-50 border border-red-200 p-3">
-            <p class="text-xs font-bold text-red-700 mb-1">⚠ Auto-checks found:</p>
-            <ul class="text-xs text-red-700 list-disc list-inside space-y-0.5">
-              {% for f in flags %}<li>{{ f }}</li>{% endfor %}
-            </ul>
-          </div>
-        {% else %}
-          <div class="mt-3 rounded-xl bg-green-50 border border-green-200 p-3">
-            <p class="text-xs font-bold text-green-700">✓ All auto-checks passed</p>
-          </div>
-        {% endif %}
-
-        <div class="flex gap-2 mt-4">
-          <form method="POST" action="{{ url_for('admin_approve', sid=s.id) }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold">✓ Approve</button>
-          </form>
-          <form method="POST" action="{{ url_for('admin_reject', sid=s.id) }}"
-                data-prompt-reason>
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="reason">
-            <button class="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold">✗ Reject</button>
-          </form>
-        </div>
+<div class="bg-slate-50 min-h-screen py-10">
+  <div class="max-w-6xl mx-auto px-4">
+    
+    <div class="flex items-center justify-between mb-8">
+      <div>
+        <h1 class="text-3xl font-black text-slate-900">Vendor Applications</h1>
+        <p class="text-slate-500 mt-1">Review KYC details and approve new businesses.</p>
       </div>
-    {% endfor %}
-    {% if not pending %}
-      <p class="text-slate-400 text-sm py-6 text-center bg-white rounded-2xl border border-slate-200">No pending applications.</p>
-    {% endif %}
+      <a href="/admin" class="text-sm font-bold text-slate-500 hover:text-slate-900 bg-white border border-slate-200 px-4 py-2 rounded-xl shadow-sm transition">← Back to Dashboard</a>
+    </div>
+
+    {% with msgs = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in msgs %}
+        <div class="mb-6 rounded-2xl p-4 text-sm font-bold shadow-sm {{ 'bg-red-50 text-red-700 border border-red-200' if cat=='error' else 'bg-emerald-50 text-emerald-700 border border-emerald-200' }}">
+          {{ msg }}
+        </div>
+      {% endfor %}
+    {% endwith %}
+
+    <h2 class="text-xl font-black text-slate-900 mb-4 flex items-center gap-2">
+      Pending Review
+      <span class="bg-brand-500 text-white text-xs px-2.5 py-0.5 rounded-full">{{ pending|length }}</span>
+    </h2>
+    
+    <div class="space-y-6 mb-12">
+      {% for s in pending %}
+        {% set flags = s.auto_flags|from_json if s.auto_flags else [] %}
+        <div class="bg-white rounded-3xl border border-slate-200 p-6 md:p-8 shadow-soft">
+          <div class="flex flex-wrap justify-between items-start gap-4 mb-6 border-b border-slate-100 pb-4">
+            <div class="flex items-center gap-4">
+              <div class="w-14 h-14 rounded-2xl bg-slate-100 border border-slate-200 overflow-hidden shrink-0">
+                {% if s.logo %}<img src="{{ s.logo }}" class="w-full h-full object-cover">{% else %}<div class="w-full h-full grid place-items-center text-xl font-black text-slate-300">{{ s.name[0] }}</div>{% endif %}
+              </div>
+              <div>
+                <h3 class="text-xl font-black text-slate-900">{{ s.name }}</h3>
+                <p class="text-sm text-slate-500 font-medium">{{ s.category }} · {{ s.seller_type|capitalize }}</p>
+              </div>
+            </div>
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 text-amber-700 text-xs font-bold border border-amber-200">
+              <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span> PENDING
+            </span>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-8 mb-6 text-sm">
+            <div class="space-y-3">
+              <div><span class="text-slate-400 font-semibold block text-xs uppercase tracking-wide">Legal Name</span> <span class="font-medium text-slate-900">{{ s.legal_name or "—" }}</span></div>
+              <div><span class="text-slate-400 font-semibold block text-xs uppercase tracking-wide">Phone Number</span> <span class="font-medium text-slate-900">{{ s.phone or "—" }}</span></div>
+              <div><span class="text-slate-400 font-semibold block text-xs uppercase tracking-wide">Email</span> <span class="font-medium text-slate-900">{{ s.business_email or "—" }}</span></div>
+              <div><span class="text-slate-400 font-semibold block text-xs uppercase tracking-wide">Address</span> <span class="font-medium text-slate-900">{{ s.address }}, {{ s.city }}, {{ s.state }}</span></div>
+            </div>
+            <div class="space-y-3">
+              <div><span class="text-slate-400 font-semibold block text-xs uppercase tracking-wide">CAC / RC Number</span> <span class="font-medium text-slate-900">{{ s.cac_number or "— (individual)" }}</span></div>
+              <div><span class="text-slate-400 font-semibold block text-xs uppercase tracking-wide">ID Type & Number</span> <span class="font-medium text-slate-900">{{ s.id_type }} — {{ s.id_number }}</span></div>
+              <div><span class="text-slate-400 font-semibold block text-xs uppercase tracking-wide">Price Range</span> <span class="font-medium text-slate-900">{{ s.price_range or "—" }}</span></div>
+              <div><span class="text-slate-400 font-semibold block text-xs uppercase tracking-wide">Products Summary</span> <span class="font-medium text-slate-900">{{ s.product_summary or "—" }}</span></div>
+            </div>
+          </div>
+
+          {% if s.id_image %}
+            <div class="mb-6">
+              <span class="text-slate-400 font-semibold block text-xs uppercase tracking-wide mb-2">Uploaded ID Document</span>
+              <a href="{{ s.id_image|kyc_url }}" target="_blank" class="inline-block relative group">
+                <img src="{{ s.id_image|kyc_url }}" class="h-32 rounded-xl border border-slate-200 object-cover shadow-sm group-hover:opacity-80 transition">
+                <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                  <span class="bg-black/50 text-white text-xs font-bold px-3 py-1.5 rounded-lg backdrop-blur-sm">Click to expand</span>
+                </div>
+              </a>
+            </div>
+          {% endif %}
+
+          {% if flags %}
+            <div class="rounded-2xl bg-red-50 border border-red-100 p-4 mb-6">
+              <p class="text-xs font-bold text-red-800 uppercase tracking-wide mb-2 flex items-center gap-1">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                Auto-checks found warnings
+              </p>
+              <ul class="text-sm text-red-700 list-disc list-inside space-y-1 font-medium">
+                {% for f in flags %}<li>{{ f }}</li>{% endfor %}
+              </ul>
+            </div>
+          {% else %}
+            <div class="rounded-2xl bg-emerald-50 border border-emerald-100 p-4 mb-6 flex items-center gap-2">
+              <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+              <p class="text-sm font-bold text-emerald-700">All auto-checks passed successfully.</p>
+            </div>
+          {% endif %}
+
+          <div class="flex flex-wrap gap-3 pt-4 border-t border-slate-100">
+            <form method="POST" action="{{ url_for('admin_approve', sid=s.id) }}">
+              <button class="px-6 py-2.5 bg-slate-900 hover:bg-black text-white rounded-xl text-sm font-bold shadow-soft transition flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                Approve Shop
+              </button>
+            </form>
+            <form method="POST" action="{{ url_for('admin_reject', sid=s.id) }}" onsubmit="return promptForReason(this)">
+              <input type="hidden" name="reason">
+              <button class="px-6 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-xl text-sm font-bold transition flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                Reject
+              </button>
+            </form>
+          </div>
+        </div>
+      {% endfor %}
+      
+      {% if not pending %}
+        <div class="py-16 text-center bg-white rounded-3xl border border-slate-200 shadow-sm">
+          <p class="text-4xl mb-3">🎉</p>
+          <h3 class="text-lg font-bold text-slate-900">All caught up!</h3>
+          <p class="text-slate-500">No pending applications to review.</p>
+        </div>
+      {% endif %}
+    </div>
+
+    <!-- Other statuses (Approved, Rejected, Active) can be added as tabs here, but for now we focus on Pending -->
   </div>
-
-  {% if approved %}
-    <h2 class="text-lg font-bold mb-3">Approved · awaiting payment ({{ approved|length }})</h2>
-    <div class="space-y-2 mb-8">
-      {% for s in approved %}
-        <div class="bg-white rounded-xl border border-slate-200 p-3 flex justify-between text-sm">
-          <span><b>{{ s.name }}</b> · {{ s.phone }}</span>
-          <span class="text-xs text-slate-500">approved {{ s.reviewed_at.strftime("%d %b") if s.reviewed_at else "" }}</span>
-        </div>
-      {% endfor %}
-    </div>
-  {% endif %}
-
-  {% if rejected %}
-    <h2 class="text-lg font-bold mb-3">Rejected ({{ rejected|length }})</h2>
-    <div class="space-y-2 mb-8">
-      {% for s in rejected %}
-        <div class="bg-white rounded-xl border border-slate-200 p-3 text-sm">
-          <b>{{ s.name }}</b> — <span class="text-red-600">{{ s.rejection_reason }}</span>
-        </div>
-      {% endfor %}
-    </div>
-  {% endif %}
-
-  {% if active %}
-    <h2 class="text-lg font-bold mb-3">Active shops ({{ active|length }})</h2>
-    <div class="space-y-2">
-      {% for s in active %}
-        <a href="{{ url_for('shop_page', slug=s.slug) }}" target="_blank"
-           class="block bg-white rounded-xl border border-slate-200 p-3 text-sm hover:border-amber-400">
-          <b>{{ s.name }}</b> · {{ s.category }} · {{ s.phone }}
-        </a>
-      {% endfor %}
-    </div>
-  {% endif %}
 </div>
 
+<script>
+  function promptForReason(form) {
+    const reason = prompt("Reason for rejecting this application:");
+    if (!reason || reason.trim().length < 5) return false;
+    form.reason.value = reason.trim();
+    return true;
+  }
+</script>
 {% endblock %}

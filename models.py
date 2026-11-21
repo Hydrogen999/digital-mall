@@ -4,6 +4,7 @@ from datetime import datetime
 
 db = SQLAlchemy()
 
+
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -87,8 +88,8 @@ class Conversation(db.Model):
     shop_id = db.Column(db.Integer, db.ForeignKey("shop.id"), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    shop = db.relationship("Shop")        # <-- NEW (chat code uses conv.shop)
-    customer = db.relationship("User")    # <-- NEW
+    shop = db.relationship("Shop")
+    customer = db.relationship("User")
 
     messages = db.relationship("Message", backref="conversation", lazy=True,
                                cascade="all, delete", order_by="Message.created_at")
@@ -115,7 +116,7 @@ class Order(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     items = db.relationship("OrderItem", backref="order", cascade="all, delete")
-    customer = db.relationship("User")    # <-- NEW (fixes the AttributeError after payment)
+    customer = db.relationship("User")
 
 
 class OrderItem(db.Model):
@@ -195,3 +196,17 @@ class ReelLike(db.Model):
     reel_id = db.Column(db.Integer, db.ForeignKey("reel.id"), nullable=False, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+# --- FIXED: BankAccount is now properly at the bottom, not inside ReelLike ---
+class BankAccount(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    shop_id = db.Column(db.Integer, db.ForeignKey("shop.id"), nullable=False, unique=True)
+    bank_name = db.Column(db.String(100))
+    bank_code = db.Column(db.String(10))
+    account_number = db.Column(db.String(20))
+    account_name = db.Column(db.String(100))
+    recipient_code = db.Column(db.String(100)) # Given to us by Paystack
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    shop = db.relationship("Shop")

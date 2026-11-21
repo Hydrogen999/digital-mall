@@ -1,31 +1,110 @@
 {% extends "base.html" %}
+{% block title %}Welcome to the Mall{% endblock %}
+
 {% block content %}
-<section class="max-w-7xl mx-auto px-4 pt-10 pb-6">
-  <h1 class="text-4xl md:text-6xl font-black tracking-tight">Walk into any store.<br><span class="text-amber-500">Talk to the owner.</span></h1>
-</section>
-<section class="max-w-7xl mx-auto px-4 py-8">
-  <h2 class="text-2xl font-bold mb-4">Featured Shops</h2>
-  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-    {% for s in shops %}
-      <a href="/shop/{{ s.slug }}" class="group rounded-2xl overflow-hidden bg-white border border-slate-200 hover:shadow-xl transition">
-        <div class="h-32 bg-slate-200"><img src="{{ s.banner or 'https://via.placeholder.com/400x200' }}" class="w-full h-full object-cover"></div>
-        <div class="p-3"><div class="font-semibold text-sm">{{ s.name }}</div></div>
+<!-- Hero Section -->
+<section class="relative overflow-hidden bg-slate-900 text-white">
+  <!-- Decorative gradients -->
+  <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[500px] bg-brand-500/20 blur-[120px] rounded-full pointer-events-none"></div>
+  <div class="absolute bottom-0 right-0 w-[800px] h-[400px] bg-blue-500/10 blur-[100px] rounded-full pointer-events-none"></div>
+  
+  <div class="max-w-7xl mx-auto px-4 py-24 md:py-32 relative z-10 text-center">
+    <span class="inline-block py-1 px-3 rounded-full bg-white/10 border border-white/20 text-xs font-bold tracking-wider uppercase mb-6 backdrop-blur-sm">
+      The Digital Shopping Mall
+    </span>
+    <h1 class="text-5xl md:text-7xl font-extrabold tracking-tight leading-[1.1] mb-6">
+      Walk into any store.<br>
+      <span class="text-transparent bg-clip-text bg-gradient-to-r from-brand-400 to-brand-600">Talk to the owner.</span>
+    </h1>
+    <p class="mt-4 text-lg md:text-xl text-slate-300 max-w-2xl mx-auto mb-10">
+      Discover verified independent vendors. Browse their shelves, chat live, and buy with confidence through our secure escrow system.
+    </p>
+    <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+      <a href="/shops" class="w-full sm:w-auto px-8 py-4 bg-brand-500 hover:bg-brand-400 text-white rounded-full font-bold text-lg transition shadow-[0_0_40px_-10px_rgba(245,158,11,0.5)]">
+        Explore Shops
       </a>
-    {% endfor %}
+      <a href="/reels" class="w-full sm:w-auto px-8 py-4 bg-white/10 hover:bg-white/20 border border-white/20 backdrop-blur-md text-white rounded-full font-bold text-lg transition flex items-center justify-center gap-2">
+        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" fill-rule="evenodd"></path></svg>
+        Watch Reels
+      </a>
+    </div>
   </div>
 </section>
-<section class="max-w-7xl mx-auto px-4 py-8">
-  <h2 class="text-2xl font-bold mb-4">Trending Products</h2>
-  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-    {% for p in products %}
-      <a href="/product/{{ p.id }}" class="bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-lg transition">
-        <div class="aspect-square bg-slate-100"><img src="{{ p.image or 'https://via.placeholder.com/400' }}" class="w-full h-full object-cover"></div>
-        <div class="p-3">
-          <div class="text-sm font-medium truncate">{{ p.name }}</div>
-          <div class="font-bold text-amber-600">₦{{ "{:,.2f}".format(p.price) }}</div>
+
+<!-- Featured Shops -->
+<section class="max-w-7xl mx-auto px-4 py-16">
+  <div class="flex items-end justify-between mb-8">
+    <div>
+      <h2 class="text-3xl font-extrabold tracking-tight">Featured Shops</h2>
+      <p class="text-slate-500 mt-1">Hand-picked businesses making waves.</p>
+    </div>
+    <a href="/shops" class="text-sm font-bold text-brand-600 hover:text-brand-700 flex items-center gap-1 group">
+      See all shops 
+      <span class="group-hover:translate-x-1 transition-transform">→</span>
+    </a>
+  </div>
+  
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
+    {% for s in shops %}
+      <a href="/shop/{{ s.slug }}" class="group bg-white rounded-3xl p-3 border border-slate-200/80 shadow-soft hover:shadow-float hover:-translate-y-1 transition-all duration-300 flex flex-col items-center text-center">
+        <div class="w-full aspect-square rounded-2xl overflow-hidden bg-slate-100 mb-4 relative">
+          {% if s.logo %}
+            <img src="{{ s.logo }}" class="w-full h-full object-cover group-hover:scale-110 transition duration-500">
+          {% else %}
+            <div class="w-full h-full grid place-items-center text-4xl text-slate-300 font-black">{{ s.name[0] }}</div>
+          {% endif %}
+          <div class="absolute inset-0 ring-1 ring-inset ring-black/5 rounded-2xl"></div>
         </div>
+        <h3 class="font-bold text-slate-900 group-hover:text-brand-600 transition truncate w-full">{{ s.name }}</h3>
+        <p class="text-xs text-slate-500 mt-0.5">{{ s.category }}</p>
       </a>
     {% endfor %}
+    {% if not shops %}
+      <div class="col-span-full py-12 text-center text-slate-400 bg-white rounded-3xl border border-slate-200 border-dashed">
+        No shops available yet.
+      </div>
+    {% endif %}
+  </div>
+</section>
+
+<!-- Trending Products -->
+<section class="bg-slate-100/50 py-16 border-y border-slate-200/60">
+  <div class="max-w-7xl mx-auto px-4">
+    <div class="flex items-end justify-between mb-8">
+      <div>
+        <h2 class="text-3xl font-extrabold tracking-tight">Trending Now</h2>
+        <p class="text-slate-500 mt-1">The most viewed products across the mall.</p>
+      </div>
+      <a href="/search?sort=popular" class="text-sm font-bold text-brand-600 hover:text-brand-700 flex items-center gap-1 group">
+        View more 
+        <span class="group-hover:translate-x-1 transition-transform">→</span>
+      </a>
+    </div>
+    
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
+      {% for p in products %}
+        <a href="/product/{{ p.id }}" class="group bg-white rounded-3xl border border-slate-200/80 overflow-hidden hover:shadow-float hover:border-brand-200 transition-all duration-300 flex flex-col">
+          <div class="aspect-[4/5] bg-slate-100 relative overflow-hidden">
+            {% if p.image %}
+              <img src="{{ p.image }}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500">
+            {% endif %}
+            <div class="absolute top-3 right-3 bg-white/90 backdrop-blur text-xs font-bold px-2 py-1 rounded-full shadow-sm">
+              ₦{{ "{:,.0f}".format(p.price) }}
+            </div>
+          </div>
+          <div class="p-4 flex flex-col flex-1">
+            <p class="text-[11px] font-bold text-brand-600 uppercase tracking-wide mb-1">{{ p.shop.name }}</p>
+            <h3 class="font-semibold text-slate-900 truncate mb-2 group-hover:text-brand-600 transition">{{ p.name }}</h3>
+            <div class="mt-auto pt-2 flex items-center gap-2">
+              <div class="w-6 h-6 rounded-full bg-slate-100 overflow-hidden shrink-0">
+                {% if p.shop.logo %}<img src="{{ p.shop.logo }}" class="w-full h-full object-cover">{% endif %}
+              </div>
+              <span class="text-xs text-slate-500 truncate">Verified Seller</span>
+            </div>
+          </div>
+        </a>
+      {% endfor %}
+    </div>
   </div>
 </section>
 {% endblock %}

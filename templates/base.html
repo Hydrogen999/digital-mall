@@ -88,10 +88,21 @@
           <a href="/register" class="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-full transition shadow-soft">Get Started</a>
         {% endif %}
         
-        <!-- Cart Icon -->
-        <a href="/cart" class="relative p-2 text-slate-600 hover:text-brand-600 transition ml-2">
+               <!-- Cart Icon with Live Counter -->
+        <a href="/cart" class="relative p-2 text-slate-600 hover:text-brand-600 transition ml-2 flex items-center gap-1 font-bold text-sm">
           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg>
+          <span id="nav-cart-count" class="bg-brand-500 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center shadow-sm">0</span>
         </a>
+
+<script nonce="{{ csp_nonce }}">
+  // Update cart counter on page load
+  document.addEventListener("DOMContentLoaded", () => {
+    const cart = JSON.parse(localStorage.getItem("mall_cart") || "[]");
+    const count = cart.reduce((sum, item) => sum + item.qty, 0);
+    const badge = document.getElementById("nav-cart-count");
+    if (badge) badge.innerText = count;
+  });
+</script>
       </nav>
     </div>
   </header>

@@ -642,24 +642,33 @@ def home():
 def search():
     q = clip(request.args.get("q"), 100)
     category = clip(request.args.get("category"), 60)
+    page = request.args.get("page", 1, type=int)
+    
     query = Product.query.filter_by(is_active=True).join(Shop).filter(Shop.is_approved.is_(True))
     if q:
         like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
         query = query.filter(Product.name.ilike(like, escape="\\") | Product.description.ilike(like, escape="\\"))
     if category:
         query = query.filter(Product.shop.has(Shop.category == category))
-    products = query.order_by(Product.created_at.desc()).limit(60).all()
-    return render_template("search.html", products=products, q=q, category=category)
-
+        
+    # Paginate: 12 items per page
+    pagination = query.order_by(Product.created_at.desc()).paginate(page=page, per_page=12, error_out=False)
+    
+    return render_template("search.html", products=pagination.items, pagination=pagination, q=q, category=category)
 
 @app.route("/shop/<slug>")
 def shop_page(slug):
     shop = Shop.query.filter_by(slug=slug[:140], is_approved=True).first_or_404()
     _count_view(Shop, shop.id)
+    page = request.args.get("page", 1, type=int)
+    
     reviews = Review.query.filter_by(shop_id=shop.id).order_by(Review.created_at.desc()).limit(100).all()
     avg_rating = sum(r.rating for r in reviews) / len(reviews) if reviews else 0.0
-    return render_template("shop.html", shop=shop, reviews=reviews, avg_rating=avg_rating)
-
+    
+    # Paginate products: 12 per page
+    pagination = Product.query.filter_by(shop_id=shop.id, is_active=True).order_by(Product.created_at.desc()).paginate(page=page, per_page=12, error_out=False)
+    
+    return render_template("shop.html", shop=shop, reviews=reviews, avg_rating=avg_rating, products=pagination.items, pagination=pagination)
 
 @app.route("/shop/<slug>/review", methods=["POST"])
 @login_required

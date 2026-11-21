@@ -16,6 +16,22 @@
         </a>
       {% endfor %}
     </div>
+
+    <!-- PAGINATION CONTROLS -->
+    {% if pagination.pages > 1 %}
+      <div class="flex justify-center items-center gap-2 mt-10">
+        {% if pagination.has_prev %}
+          <a href="?q={{ q }}&category={{ category }}&page={{ pagination.prev_num }}" class="px-4 py-2 border rounded-lg hover:bg-slate-50 font-semibold text-sm">← Previous</a>
+        {% endif %}
+        
+        <span class="text-sm text-slate-500 font-medium px-4">Page {{ pagination.page }} of {{ pagination.pages }}</span>
+        
+        {% if pagination.has_next %}
+          <a href="?q={{ q }}&category={{ category }}&page={{ pagination.next_num }}" class="px-4 py-2 border rounded-lg hover:bg-slate-50 font-semibold text-sm">Next →</a>
+        {% endif %}
+      </div>
+    {% endif %}
+
   {% else %}
     <p class="text-slate-500 py-20 text-center">No products found matching your search.</p>
   {% endif %}

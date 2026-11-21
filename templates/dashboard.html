@@ -2,325 +2,487 @@
 {% block title %}Dashboard · {{ shop.name }}{% endblock %}
 
 {% block content %}
-<div class="max-w-7xl mx-auto px-4 py-6">
-
-  <!-- ═══════════════ SUBSCRIPTION BANNER ═══════════════ -->
-  <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 flex justify-between items-center mb-6 shadow-sm">
-    <div>
-      <b>Subscription Status:</b> Active 
-      <span class="text-sm ml-2">(Expires in <b>{{ days_left }} days</b>)</span>
-    </div>
-    <a href="/vendor/pay-activation" class="text-sm font-bold bg-amber-500 text-white px-4 py-2 rounded-lg hover:bg-amber-600 transition">
-      Renew Early (₦10,000)
-    </a>
-  </div>
-
-  <!-- ═══════════════ STATS ═══════════════ -->
-  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm relative">
-      <div class="text-xs text-slate-500 font-medium">Wallet Balance</div>
-      <div class="text-2xl font-bold text-emerald-600 mt-1">₦{{ "{:,.2f}".format(shop.wallet_balance) }}</div>
-      {% if shop.wallet_balance > 0 %}
-        <button data-dialog-open="withdraw-modal" 
-                class="absolute bottom-4 right-4 text-xs bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg transition font-semibold">
-          Withdraw
-        </button>
-      {% endif %}
-    </div>
-    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-      <div class="text-xs text-slate-500 font-medium">Total Sales</div>
-      <div class="text-2xl font-bold text-slate-800 mt-1">₦{{ "{:,.2f}".format(total_sales) }}</div>
-    </div>
-    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-      <div class="text-xs text-slate-500 font-medium">Shop Views</div>
-      <div class="text-2xl font-bold text-slate-800 mt-1">{{ shop.views }}</div>
-    </div>
-    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-      <div class="text-xs text-slate-500 font-medium">Orders</div>
-      <div class="text-2xl font-bold text-slate-800 mt-1">{{ order_items|length }}</div>
-    </div>
-  </div>
-
-  <!-- ═══════════════ MAIN CONTENT ═══════════════ -->
-  <div class="grid lg:grid-cols-[240px,1fr] gap-6">
-    
-    <!-- SIDEBAR -->
-    <aside class="bg-white rounded-2xl border border-slate-200 p-3 h-fit sticky top-20 shadow-sm">
-      <div class="flex items-center gap-3 p-2 mb-2 border-b border-slate-100">
-        {% if shop.logo %}<img src="{{ shop.logo }}" class="w-10 h-10 rounded-full object-cover border">{% endif %}
+<div class="bg-slate-50 min-h-screen pb-12">
+  
+  <!-- ═══════════════ TOP BAR (Subscription) ═══════════════ -->
+  <div class="bg-white border-b border-slate-200 px-4 py-3">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-brand-50 text-brand-600 grid place-items-center font-bold text-lg shadow-sm border border-brand-100">
+          {{ shop.name[0] | upper }}
+        </div>
         <div>
-          <div class="font-bold text-sm truncate">{{ shop.name }}</div>
-          <div class="text-xs text-emerald-600 font-semibold">Approved</div>
+          <h1 class="text-lg font-bold text-slate-900">{{ shop.name }}</h1>
+          <p class="text-xs text-slate-500">Vendor Dashboard</p>
         </div>
       </div>
-
-      <!-- FIX 1: Moved Edit Shop Profile INSIDE the sidebar -->
-      <a href="#" data-dialog-open="edit-shop-modal" class="block text-center mt-1 mb-3 text-xs font-semibold text-amber-600 hover:text-amber-700 bg-amber-50 py-1.5 rounded-lg border border-amber-200 transition">
-        ✏️ Edit Shop Profile
-      </a>
-
-      <button data-tab="products" class="tab-btn w-full text-left px-3 py-2.5 rounded-lg text-sm hover:bg-slate-50 font-medium transition">Products</button>
-      <button data-tab="orders" class="tab-btn w-full text-left px-3 py-2.5 rounded-lg text-sm hover:bg-slate-50 font-medium transition">Orders</button>
-      <button data-tab="messages" class="tab-btn w-full text-left px-3 py-2.5 rounded-lg text-sm hover:bg-slate-50 font-medium transition">Messages</button>
-      <button data-tab="reels" class="tab-btn w-full text-left px-3 py-2.5 rounded-lg text-sm hover:bg-slate-50 font-medium transition text-amber-600 font-semibold">Promote Reels</button>
-    </aside>
-
-    <!-- PANELS -->
-    <section class="space-y-6">
       
-      <!-- 1. PRODUCTS -->
-      <div data-panel="products" class="panel bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-lg font-bold">Products</h2>
-          <button data-dialog-open="add-prod" class="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold transition">+ Add Product</button>
+      <div class="flex items-center gap-4">
+        <div class="text-right hidden sm:block">
+          <p class="text-xs text-slate-500">Subscription Status</p>
+          <p class="text-sm font-bold text-emerald-600">Active · {{ days_left }} days left</p>
         </div>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {% for p in products %}
-            <div class="border rounded-xl overflow-hidden group relative">
-              <div class="aspect-square bg-slate-100 relative">
-                {% if p.image %}<img src="{{ p.image }}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300">{% endif %}
-                <!-- Action Buttons -->
-                <div class="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition">
-                  <button onclick='openEditProduct({{ {"id": p.id, "name": p.name, "price": p.price, "stock": p.stock, "description": p.description}|tojson }})' class="bg-white text-slate-800 p-1.5 rounded-md shadow hover:bg-slate-100" title="Edit">
-                    ✏️
-                  </button>
-                  <form method="POST" action="/vendor/product/delete/{{ p.id }}" onsubmit="return confirm('Are you sure you want to remove this product?');">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button class="bg-red-500 text-white p-1.5 rounded-md shadow hover:bg-red-600" title="Delete">
-                      🗑️
-                    </button>
-                  </form>
-                </div>
-              </div>
-              <div class="p-3 text-sm">
-                <div class="font-semibold truncate">{{ p.name }}</div>
-                <div class="text-amber-600 font-bold mt-1">₦{{ "{:,.2f}".format(p.price) }}</div>
-                <div class="text-xs text-slate-500 mt-1">Stock: {{ p.stock }} · Views: {{ p.views }}</div>
-              </div>
-            </div>
-          {% endfor %}
-        </div>
-      </div> <!-- FIX 2: Added missing closing div here -->
-
-      <!-- 2. ORDERS -->
-      <div data-panel="orders" class="panel hidden bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-        <h2 class="text-lg font-bold mb-4">Orders</h2>
-                <h2 class="text-lg font-bold mb-2">Orders</h2>
-        <p class="text-xs text-slate-500 mb-4">Note: If a customer doesn't click "Received" within 7 days of you shipping, the funds will be automatically released to your wallet.</p>
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead class="text-left text-slate-500 border-b">
-              <tr><th class="py-3 px-2">Item</th><th class="px-2">Qty</th><th class="px-2">Status</th><th class="px-2 text-right">Action</th></tr>
-            </thead>
-            <tbody>
-              {% for i in order_items %}
-                <tr class="border-b last:border-0 hover:bg-slate-50 transition">
-                  <td class="py-3 px-2 font-medium">{{ i.name }}</td>
-                  <td class="px-2">{{ i.qty }}</td>
-                  <td class="px-2">
-                    <span class="px-2 py-1 text-[10px] uppercase tracking-wide rounded-full font-bold
-                      {{ 'bg-blue-100 text-blue-700' if i.status=='PAID' else 'bg-amber-100 text-amber-700' if i.status=='SHIPPED' else 'bg-green-100 text-green-700' }}">
-                      {{ i.status }}
-                    </span>
-                  </td>
-                  <td class="px-2 text-right">
-                    {% if i.status == 'PAID' %}
-                      <form method="POST" action="/vendor/ship/{{ i.id }}">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button class="text-xs bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded-lg transition">Mark Shipped</button>
-                      </form>
-                    {% elif i.status == 'SHIPPED' %}
-                      <span class="text-xs text-slate-400">Awaiting Delivery</span>
-                    {% else %}
-                      <span class="text-xs text-emerald-600 font-semibold">Completed</span>
-                    {% endif %}
-                  </td>
-                </tr>
-              {% endfor %}
-              {% if not order_items %}
-                <tr><td colspan="4" class="py-6 text-center text-slate-400">No orders yet.</td></tr>
-              {% endif %}
-            </tbody>
-          </table>
-        </div>
+        <a href="/vendor/pay-activation" class="text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg transition shadow-soft">
+          Renew Early
+        </a>
       </div>
+    </div>
+  </div>
 
-      <!-- 3. MESSAGES -->
-      <div data-panel="messages" class="panel hidden bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-        <h2 class="text-lg font-bold mb-4">Customer Messages</h2>
-        <div class="divide-y">
-          {% for c in convos %}
-            <a href="/chat/{{ shop.slug }}?customer={{ c.customer_id }}" class="flex justify-between items-center py-3 hover:bg-slate-50 px-2 rounded transition">
-              <div class="flex items-center gap-3">
-                <div class="w-8 h-8 rounded-full bg-slate-200 grid place-items-center font-bold text-slate-500">C</div>
-                <div class="font-medium">Customer #{{ c.customer_id }}</div>
-              </div>
-              <span class="text-xs text-slate-400">{{ c.created_at.strftime("%d %b") }}</span>
-            </a>
-          {% endfor %}
-          {% if not convos %}<p class="text-sm text-slate-400 py-4 text-center">No messages yet.</p>{% endif %}
-        </div>
-      </div>
-
-      <!-- 4. REELS (PROMOTIONS) -->
-      <div data-panel="reels" class="panel hidden bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-        <div class="flex items-center justify-between mb-4">
-          <div>
-            <h2 class="text-lg font-bold">Promotional Reels</h2>
-            <p class="text-xs text-slate-500 mt-1">Upload a video to show on the main feed. Requires a ₦10,000 promotion fee.</p>
-          </div>
-          <button data-dialog-open="new-reel" class="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold transition">
-            + Promote Video
+  <div class="max-w-7xl mx-auto px-4 py-8">
+    <div class="grid lg:grid-cols-[260px,1fr] gap-8 items-start">
+      
+      <!-- ═══════════════ SIDEBAR ═══════════════ -->
+      <aside class="bg-slate-900 rounded-3xl p-3 shadow-float sticky top-24 hidden lg:block">
+        <div class="space-y-1">
+          <button data-tab="products" class="tab-btn w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-medium text-slate-400 hover:text-white hover:bg-white/10 transition-all text-left">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path></svg>
+            Products
+          </button>
+          
+          <button data-tab="orders" class="tab-btn w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-medium text-slate-400 hover:text-white hover:bg-white/10 transition-all text-left">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg>
+            Orders
+          </button>
+          
+          <button data-tab="messages" class="tab-btn w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-medium text-slate-400 hover:text-white hover:bg-white/10 transition-all text-left">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+            Messages
+          </button>
+          
+          <button data-tab="reels" class="tab-btn w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-medium text-brand-400 hover:text-white hover:bg-white/10 transition-all text-left">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            Promote Reels
           </button>
         </div>
         
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {% for r in reels %}
-            <div class="border rounded-xl overflow-hidden">
-              <video src="{{ r.video_url }}" poster="{{ r.poster_url }}" class="w-full aspect-[9/16] object-cover" muted controls></video>
-              <div class="p-2 text-xs">
-                <span class="{{ 'bg-green-100 text-green-700' if r.is_approved else 'bg-amber-100 text-amber-700' }} px-2 py-0.5 rounded-full font-semibold">
-                  {{ "Approved" if r.is_approved else "Pending Review" }}
-                </span>
-                <div class="mt-1.5 text-slate-500 font-medium">{{ r.views }} views · {{ r.likes }} likes</div>
-              </div>
-            </div>
-          {% endfor %}
-          {% if not reels %}
-            <div class="col-span-4 text-center py-10">
-              <div class="text-4xl mb-2">🎬</div>
-              <p class="text-sm text-slate-400">No reels yet. Promote your first video!</p>
-            </div>
-          {% endif %}
+        <div class="mt-8 pt-6 border-t border-white/10 px-2">
+          <button data-dialog-open="edit-shop-modal" class="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-medium text-slate-400 hover:text-white hover:bg-white/10 transition-all text-left">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+            Shop Settings
+          </button>
         </div>
-      </div>
+      </aside>
 
-    </section>
+      <!-- ═══════════════ MAIN CONTENT ═══════════════ -->
+      <div class="min-w-0">
+        
+        <!-- STATS CARDS -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          <!-- Wallet -->
+          <div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-soft relative overflow-hidden group">
+            <div class="absolute -right-4 -top-4 w-24 h-24 bg-emerald-50 rounded-full group-hover:scale-110 transition duration-500"></div>
+            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide relative z-10">Wallet</p>
+            <p class="text-2xl font-black text-slate-900 mt-1 relative z-10">₦{{ "{:,.0f}".format(shop.wallet_balance) }}</p>
+            {% if shop.wallet_balance > 0 %}
+              <button data-dialog-open="withdraw-modal" class="mt-4 w-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold py-2 rounded-xl transition relative z-10">Withdraw</button>
+            {% endif %}
+          </div>
+          
+          <!-- Sales -->
+          <div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-soft relative overflow-hidden group">
+            <div class="absolute -right-4 -top-4 w-24 h-24 bg-brand-50 rounded-full group-hover:scale-110 transition duration-500"></div>
+            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide relative z-10">Total Sales</p>
+            <p class="text-2xl font-black text-slate-900 mt-1 relative z-10">₦{{ "{:,.0f}".format(total_sales) }}</p>
+          </div>
+
+          <!-- Views -->
+          <div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-soft relative overflow-hidden group">
+            <div class="absolute -right-4 -top-4 w-24 h-24 bg-blue-50 rounded-full group-hover:scale-110 transition duration-500"></div>
+            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide relative z-10">Shop Views</p>
+            <p class="text-2xl font-black text-slate-900 mt-1 relative z-10">{{ shop.views }}</p>
+          </div>
+
+          <!-- Orders -->
+          <div class="bg-white p-5 rounded-3xl border border-slate-200 shadow-soft relative overflow-hidden group">
+            <div class="absolute -right-4 -top-4 w-24 h-24 bg-purple-50 rounded-full group-hover:scale-110 transition duration-500"></div>
+            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide relative z-10">Orders</p>
+            <p class="text-2xl font-black text-slate-900 mt-1 relative z-10">{{ order_items|length }}</p>
+          </div>
+        </div>
+
+        <!-- TAB PANELS -->
+        
+        <!-- 1. PRODUCTS -->
+        <div data-panel="products" class="panel hidden animate-fade-in">
+          <div class="flex items-center justify-between mb-6">
+            <h2 class="text-xl font-black text-slate-900">Your Inventory</h2>
+            <button data-dialog-open="add-prod" class="bg-brand-500 hover:bg-brand-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-soft transition flex items-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+              Add Product
+            </button>
+          </div>
+          
+          <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+            {% for p in products %}
+              <div class="bg-white rounded-3xl border border-slate-200 shadow-sm hover:shadow-float transition-all duration-300 group overflow-hidden flex flex-col relative">
+                <div class="aspect-[4/5] bg-slate-100 relative overflow-hidden">
+                  {% if p.image %}<img src="{{ p.image }}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500">{% endif %}
+                  
+                  <!-- Action overlay -->
+                  <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition duration-300 flex items-center justify-center gap-3">
+                    <button onclick='openEditProduct({{ {"id": p.id, "name": p.name, "price": p.price, "stock": p.stock, "description": p.description}|tojson }})' class="w-10 h-10 bg-white text-slate-900 rounded-full flex items-center justify-center hover:bg-brand-50 hover:text-brand-600 transition shadow-lg" title="Edit">
+                      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                    </button>
+                    <form method="POST" action="/vendor/product/delete/{{ p.id }}" onsubmit="return confirm('Remove this product?');">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <button class="w-10 h-10 bg-white text-red-500 rounded-full flex items-center justify-center hover:bg-red-50 transition shadow-lg" title="Delete">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                      </button>
+                    </form>
+                  </div>
+                </div>
+                <div class="p-4 flex-1 flex flex-col">
+                  <h3 class="text-sm font-bold text-slate-900 truncate">{{ p.name }}</h3>
+                  <p class="text-xs text-slate-500 mt-1">Stock: {{ p.stock }}</p>
+                  <div class="mt-auto pt-3 flex items-center justify-between border-t border-slate-100">
+                    <span class="font-black text-brand-600">₦{{ "{:,.2f}".format(p.price) }}</span>
+                    <span class="text-[10px] text-slate-400 font-semibold">{{ p.views }} views</span>
+                  </div>
+                </div>
+              </div>
+            {% endfor %}
+            {% if not products %}
+              <div class="col-span-full py-20 text-center bg-white rounded-3xl border border-dashed border-slate-300">
+                <p class="text-4xl mb-3">📦</p>
+                <p class="text-slate-500 font-medium">No products yet. Add your first item!</p>
+              </div>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- 2. ORDERS -->
+        <div data-panel="orders" class="panel hidden animate-fade-in">
+          <div class="flex items-center justify-between mb-6">
+            <h2 class="text-xl font-black text-slate-900">Recent Orders</h2>
+            <p class="text-xs text-slate-500 bg-white px-3 py-1.5 rounded-full border">Auto-releases funds after 7 days if customer doesn't click "Received"</p>
+          </div>
+          
+          <div class="bg-white rounded-3xl border border-slate-200 shadow-soft overflow-hidden">
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-sm whitespace-nowrap">
+                <thead class="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
+                  <tr>
+                    <th class="py-4 px-6">Item</th>
+                    <th class="py-4 px-6">Qty</th>
+                    <th class="py-4 px-6">Status</th>
+                    <th class="py-4 px-6 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  {% for i in order_items %}
+                    <tr class="hover:bg-slate-50/50 transition">
+                      <td class="py-4 px-6 font-semibold text-slate-900">{{ i.name }}</td>
+                      <td class="py-4 px-6 text-slate-600">{{ i.qty }}</td>
+                      <td class="py-4 px-6">
+                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold
+                          {{ 'bg-blue-50 text-blue-700' if i.status=='PAID' else 'bg-brand-50 text-brand-700' if i.status=='SHIPPED' else 'bg-emerald-50 text-emerald-700' }}">
+                          <span class="w-1.5 h-1.5 rounded-full {{ 'bg-blue-500' if i.status=='PAID' else 'bg-brand-500' if i.status=='SHIPPED' else 'bg-emerald-500' }}"></span>
+                          {{ i.status }}
+                        </span>
+                      </td>
+                      <td class="py-4 px-6 text-right">
+                        {% if i.status == 'PAID' %}
+                          <form method="POST" action="/vendor/ship/{{ i.id }}" class="inline-block">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button class="text-xs bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl font-bold transition shadow-sm">Mark Shipped</button>
+                          </form>
+                        {% elif i.status == 'SHIPPED' %}
+                          <span class="text-xs text-slate-400 font-medium">Awaiting Delivery</span>
+                        {% else %}
+                          <span class="text-xs text-emerald-600 font-bold">Completed</span>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                  {% if not order_items %}
+                    <tr><td colspan="4" class="py-12 text-center text-slate-400">No orders found.</td></tr>
+                  {% endif %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. MESSAGES -->
+        <div data-panel="messages" class="panel hidden animate-fade-in">
+          <h2 class="text-xl font-black text-slate-900 mb-6">Customer Inbox</h2>
+          <div class="bg-white rounded-3xl border border-slate-200 shadow-soft overflow-hidden divide-y divide-slate-100">
+            {% for c in convos %}
+              <a href="/chat/{{ shop.slug }}?customer={{ c.customer_id }}" class="flex justify-between items-center p-4 hover:bg-slate-50 transition">
+                <div class="flex items-center gap-4">
+                  <div class="w-12 h-12 rounded-full bg-slate-100 border border-slate-200 grid place-items-center font-bold text-slate-500">
+                    {{ c.customer.username[0] | upper }}
+                  </div>
+                  <div>
+                    <p class="font-bold text-slate-900">{{ c.customer.username }}</p>
+                    <p class="text-xs text-slate-500 truncate max-w-[200px] md:max-w-md">{{ c.messages[-1].body if c.messages else "Started a conversation" }}</p>
+                  </div>
+                </div>
+                <span class="text-xs font-semibold text-slate-400">{{ c.created_at.strftime("%d %b") }}</span>
+              </a>
+            {% endfor %}
+            {% if not convos %}
+              <div class="p-12 text-center text-slate-400">No messages yet.</div>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- 4. REELS -->
+        <div data-panel="reels" class="panel hidden animate-fade-in">
+          <div class="flex items-center justify-between mb-6">
+            <div>
+              <h2 class="text-xl font-black text-slate-900">Promoted Reels</h2>
+              <p class="text-sm text-slate-500 mt-1">Boost your shop on the main feed for ₦10,000.</p>
+            </div>
+            <button data-dialog-open="new-reel" class="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-soft transition flex items-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+              Promote Video
+            </button>
+          </div>
+          
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {% for r in reels %}
+              <div class="bg-slate-900 rounded-3xl overflow-hidden shadow-float relative group aspect-[9/16]">
+                <video src="{{ r.video_url }}" poster="{{ r.poster_url }}" class="w-full h-full object-cover" muted></video>
+                <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-4">
+                  <span class="{{ 'bg-emerald-500 text-white' if r.is_approved else 'bg-brand-500 text-white' }} text-[10px] font-bold px-2 py-1 rounded-md self-start mb-2">
+                    {{ "LIVE" if r.is_approved else "PENDING APPROVAL" }}
+                  </span>
+                  <p class="text-white text-xs font-semibold line-clamp-2">{{ r.caption or "No caption" }}</p>
+                  <p class="text-white/60 text-[10px] mt-1">{{ r.views }} views · {{ r.likes }} likes</p>
+                </div>
+              </div>
+            {% endfor %}
+            {% if not reels %}
+              <div class="col-span-full py-20 text-center bg-white rounded-3xl border border-dashed border-slate-300">
+                <p class="text-4xl mb-3">🎬</p>
+                <p class="text-slate-500 font-medium">No promotional reels yet.</p>
+              </div>
+            {% endif %}
+          </div>
+        </div>
+
+      </div>
+    </div>
   </div>
 </div>
 
 <!-- ═══════════════ MODALS ═══════════════ -->
 
-<!-- Add Product Modal -->
-<dialog id="add-prod" class="rounded-2xl p-6 w-full max-w-md backdrop:bg-black/50 shadow-2xl">
-  <form method="POST" action="/vendor/product/add" enctype="multipart/form-data" class="space-y-4">
+<!-- Add Product -->
+<dialog id="add-prod" class="rounded-[2rem] p-0 w-full max-w-md backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm shadow-2xl overflow-hidden">
+  <form method="POST" action="/vendor/product/add" enctype="multipart/form-data" class="bg-white">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <h3 class="text-xl font-black">Add a product</h3>
-    <input name="name" required placeholder="Product name" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
-    <textarea name="description" placeholder="Description" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none" rows="3"></textarea>
-    <div class="grid grid-cols-2 gap-2">
-      <input name="price" type="number" step="0.01" required placeholder="Price (₦)" class="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
-      <input name="stock" type="number" placeholder="Stock" class="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
+    <div class="p-6 border-b border-slate-100">
+      <h3 class="text-xl font-black text-slate-900">Add New Product</h3>
+      <p class="text-sm text-slate-500 mt-1">Fill in the details below.</p>
     </div>
-    <input name="image" type="file" accept="image/*" class="text-sm block w-full text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100">
-    <div class="flex justify-end gap-2 pt-2 border-t mt-2">
-      <button type="button" data-dialog-close class="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">Cancel</button>
-      <button class="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-bold shadow-lg">Save Product</button>
+    <div class="p-6 space-y-4">
+      <div>
+        <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Product Name</label>
+        <input name="name" required placeholder="e.g. Classic Leather Watch" class="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-brand-400 outline-none transition">
+      </div>
+      <div>
+        <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Description</label>
+        <textarea name="description" rows="3" placeholder="Describe your product..." class="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-brand-400 outline-none transition"></textarea>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Price (₦)</label>
+          <input name="price" type="number" step="0.01" required placeholder="0.00" class="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-brand-400 outline-none transition">
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Stock</label>
+          <input name="stock" type="number" required placeholder="10" class="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-brand-400 outline-none transition">
+        </div>
+      </div>
+      <div>
+        <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Product Image</label>
+        <input name="image" type="file" accept="image/*" class="w-full mt-1 text-sm text-slate-500 file:mr-4 file:py-3 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-brand-50 file:text-brand-700 hover:file:bg-brand-100 transition">
+      </div>
+    </div>
+    <div class="p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+      <button type="button" data-dialog-close class="px-5 py-2.5 text-sm font-bold text-slate-500 hover:text-slate-800">Cancel</button>
+      <button class="px-6 py-2.5 bg-brand-500 hover:bg-brand-600 text-white rounded-xl text-sm font-bold shadow-soft">Save Product</button>
     </div>
   </form>
 </dialog>
 
-<!-- Promote Reel Modal (Paystack Integrated) -->
-<dialog id="new-reel" class="rounded-2xl p-6 w-full max-w-md backdrop:bg-black/50 shadow-2xl">
-  <form id="reel-form" enctype="multipart/form-data" class="space-y-4">
-    <!-- FIX 3: Added CSRF to Reel form -->
+<!-- Edit Product -->
+<dialog id="edit-prod-modal" class="rounded-[2rem] p-0 w-full max-w-md backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm shadow-2xl overflow-hidden">
+  <form id="edit-prod-form" method="POST" enctype="multipart/form-data" class="bg-white">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <div>
-      <h3 class="text-xl font-black">Promote a Video</h3>
-      <p class="text-xs text-slate-500 mt-1">Upload a video to appear on the Reels feed. You will be charged <b>₦10,000</b> to unlock this promotion.</p>
+    <div class="p-6 border-b border-slate-100">
+      <h3 class="text-xl font-black text-slate-900">Edit Product</h3>
     </div>
-    
-    <div>
-      <label class="text-sm font-semibold text-slate-700">Video File (MP4)</label>
-      <input name="video" type="file" accept="video/mp4,video/webm" required class="mt-1 block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100">
+    <div class="p-6 space-y-4">
+      <div>
+        <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Product Name</label>
+        <input name="name" id="edit-p-name" required class="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-brand-400 outline-none transition">
+      </div>
+      <div>
+        <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Description</label>
+        <textarea name="description" id="edit-p-desc" rows="3" class="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-brand-400 outline-none transition"></textarea>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Price (₦)</label>
+          <input name="price" id="edit-p-price" type="number" step="0.01" required class="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-brand-400 outline-none transition">
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Stock</label>
+          <input name="stock" id="edit-p-stock" type="number" required class="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-brand-400 outline-none transition">
+        </div>
+      </div>
+      <div>
+        <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Update Image (Optional)</label>
+        <input name="image" type="file" accept="image/*" class="w-full mt-1 text-sm text-slate-500 file:mr-4 file:py-3 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 transition">
+      </div>
     </div>
-    
-    <div>
-      <label class="text-sm font-semibold text-slate-700">Cover Image (Optional)</label>
-      <input name="poster" type="file" accept="image/*" class="mt-1 block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-slate-50 file:text-slate-700 hover:file:bg-slate-100">
+    <div class="p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+      <button type="button" data-dialog-close class="px-5 py-2.5 text-sm font-bold text-slate-500 hover:text-slate-800">Cancel</button>
+      <button class="px-6 py-2.5 bg-brand-500 hover:bg-brand-600 text-white rounded-xl text-sm font-bold shadow-soft">Save Changes</button>
     </div>
-    
-    <textarea name="caption" placeholder="Caption (e.g. New watch collection just landed)" rows="2" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none"></textarea>
-    
-    <div class="flex justify-end gap-2 pt-2 border-t mt-2">
-      <button type="button" data-dialog-close class="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">Cancel</button>
-      <button type="submit" id="reel-submit-btn" class="px-5 py-2 bg-slate-900 hover:bg-black text-white rounded-lg text-sm font-bold shadow-lg transition flex items-center gap-2">
+  </form>
+</dialog>
+
+<!-- Promote Reel -->
+<dialog id="new-reel" class="rounded-[2rem] p-0 w-full max-w-md backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm shadow-2xl overflow-hidden">
+  <form id="reel-form" enctype="multipart/form-data" class="bg-white">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="p-6 border-b border-slate-100">
+      <h3 class="text-xl font-black text-slate-900">Promote a Video</h3>
+      <p class="text-sm text-slate-500 mt-1">Upload a video to appear on the Reels feed. Fee: <b class="text-slate-900">₦10,000</b>.</p>
+    </div>
+    <div class="p-6 space-y-4">
+      <div>
+        <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Video File (MP4)</label>
+        <input name="video" type="file" accept="video/mp4,video/webm" required class="w-full mt-1 text-sm text-slate-500 file:mr-4 file:py-3 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-brand-50 file:text-brand-700 hover:file:bg-brand-100 transition">
+      </div>
+      <div>
+        <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Cover Image (Optional)</label>
+        <input name="poster" type="file" accept="image/*" class="w-full mt-1 text-sm text-slate-500 file:mr-4 file:py-3 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 transition">
+      </div>
+      <div>
+        <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Caption</label>
+        <textarea name="caption" rows="2" placeholder="New arrivals..." class="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-brand-400 outline-none transition"></textarea>
+      </div>
+    </div>
+    <div class="p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+      <button type="button" data-dialog-close class="px-5 py-2.5 text-sm font-bold text-slate-500 hover:text-slate-800">Cancel</button>
+      <button type="submit" id="reel-submit-btn" class="px-6 py-2.5 bg-slate-900 hover:bg-black text-white rounded-xl text-sm font-bold shadow-soft transition flex items-center gap-2">
         Pay ₦10,000 & Submit
       </button>
     </div>
   </form>
 </dialog>
 
-<!-- Edit Shop Modal -->
-<dialog id="edit-shop-modal" class="rounded-2xl p-6 w-full max-w-md backdrop:bg-black/50 shadow-2xl">
-  <form method="POST" action="/vendor/shop/edit" enctype="multipart/form-data" class="space-y-3">
+<!-- Edit Shop -->
+<dialog id="edit-shop-modal" class="rounded-[2rem] p-0 w-full max-w-md backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm shadow-2xl overflow-hidden">
+  <form method="POST" action="/vendor/shop/edit" enctype="multipart/form-data" class="bg-white">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <h3 class="text-xl font-black">Edit Shop Profile</h3>
-    <input name="name" required value="{{ shop.name }}" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
-    <textarea name="description" rows="3" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">{{ shop.description }}</textarea>
-    <input name="phone" value="{{ shop.phone }}" placeholder="Phone Number" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
-    <input name="location" value="{{ shop.location }}" placeholder="Location (e.g. Lagos, Nigeria)" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
-    <div>
-      <label class="text-xs font-semibold text-slate-500">Update Logo</label>
-      <input name="logo" type="file" accept="image/*" class="text-sm block w-full mt-1">
+    <div class="p-6 border-b border-slate-100">
+      <h3 class="text-xl font-black text-slate-900">Shop Settings</h3>
     </div>
-    <div>
-      <label class="text-xs font-semibold text-slate-500">Update Banner</label>
-      <input name="banner" type="file" accept="image/*" class="text-sm block w-full mt-1">
+    <div class="p-6 space-y-4">
+      <div>
+        <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Shop Name</label>
+        <input name="name" required value="{{ shop.name }}" class="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-brand-400 outline-none transition">
+      </div>
+      <div>
+        <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Description</label>
+        <textarea name="description" rows="3" class="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-brand-400 outline-none transition">{{ shop.description }}</textarea>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Phone</label>
+          <input name="phone" value="{{ shop.phone }}" class="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-brand-400 outline-none transition">
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Location</label>
+          <input name="location" value="{{ shop.location }}" class="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-brand-400 outline-none transition">
+        </div>
+      </div>
+      <div>
+        <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Update Logo</label>
+        <input name="logo" type="file" accept="image/*" class="w-full mt-1 text-sm text-slate-500 file:mr-4 file:py-3 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 transition">
+      </div>
+      <div>
+        <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Update Banner</label>
+        <input name="banner" type="file" accept="image/*" class="w-full mt-1 text-sm text-slate-500 file:mr-4 file:py-3 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 transition">
+      </div>
     </div>
-    <div class="flex justify-end gap-2 pt-2 border-t mt-2">
-      <button type="button" data-dialog-close class="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">Cancel</button>
-      <button class="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-bold shadow-lg">Save Changes</button>
+    <div class="p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+      <button type="button" data-dialog-close class="px-5 py-2.5 text-sm font-bold text-slate-500 hover:text-slate-800">Cancel</button>
+      <button class="px-6 py-2.5 bg-brand-500 hover:bg-brand-600 text-white rounded-xl text-sm font-bold shadow-soft">Save Changes</button>
     </div>
   </form>
 </dialog>
 
-<!-- Edit Product Modal -->
-<dialog id="edit-prod-modal" class="rounded-2xl p-6 w-full max-w-md backdrop:bg-black/50 shadow-2xl">
-  <form id="edit-prod-form" method="POST" enctype="multipart/form-data" class="space-y-3">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <h3 class="text-xl font-black">Edit Product</h3>
-    <input name="name" id="edit-p-name" required class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
-    <textarea name="description" id="edit-p-desc" rows="3" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none"></textarea>
-    <div class="grid grid-cols-2 gap-2">
-      <input name="price" id="edit-p-price" type="number" step="0.01" required class="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
-      <input name="stock" id="edit-p-stock" type="number" class="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-amber-400 outline-none">
-    </div>
-    <div>
-      <label class="text-xs font-semibold text-slate-500">Update Image (Optional)</label>
-      <input name="image" type="file" accept="image/*" class="text-sm block w-full mt-1">
-    </div>
-    <div class="flex justify-end gap-2 pt-2 border-t mt-2">
-      <button type="button" data-dialog-close class="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">Cancel</button>
-      <button class="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-bold shadow-lg">Save Changes</button>
-    </div>
-  </form>
-</dialog>
-
-<!-- Withdraw Modal -->
-<dialog id="withdraw-modal" class="rounded-2xl p-6 w-full max-w-md backdrop:bg-black/50 shadow-2xl">
-  <form method="POST" action="/vendor/withdraw" class="space-y-4">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <h3 class="text-xl font-black">Withdraw Funds</h3>
-    <p class="text-sm text-slate-500 mb-2">Available Balance: <b class="text-emerald-600">₦{{ "{:,.2f}".format(shop.wallet_balance) }}</b></p>
-    
-    <input name="amount" type="number" step="0.01" max="{{ shop.wallet_balance }}" required placeholder="Amount to withdraw (₦)" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-400 outline-none">
-    <input name="bank_name" required placeholder="Bank Name (e.g. GTBank)" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-400 outline-none">
-    <input name="account_number" required placeholder="Account Number" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-400 outline-none">
-    <input name="account_name" required placeholder="Account Name" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-400 outline-none">
-    
-    <div class="flex justify-end gap-2 pt-2 border-t mt-2">
-      <button type="button" data-dialog-close class="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">Cancel</button>
-      <button class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-bold shadow-lg">Request Payout</button>
-    </div>
-  </form>
+<!-- Withdraw Setup / Withdraw -->
+<dialog id="withdraw-modal" class="rounded-[2rem] p-0 w-full max-w-md backdrop:bg-slate-900/60 backdrop:backdrop-blur-sm shadow-2xl overflow-hidden">
+  {% if not bank or not bank.recipient_code %}
+    <form method="POST" action="/vendor/bank-details" class="bg-white">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="p-6 border-b border-slate-100">
+        <h3 class="text-xl font-black text-slate-900">Setup Payout Account</h3>
+        <p class="text-sm text-slate-500 mt-1">Paystack requires your bank details to send funds automatically.</p>
+      </div>
+      <div class="p-6 space-y-4">
+        <div>
+          <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Bank Name</label>
+          <input name="bank_name" required placeholder="e.g. GTBank" class="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-brand-400 outline-none transition">
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Bank Code</label>
+          <input name="bank_code" required placeholder="e.g. 058" class="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-brand-400 outline-none transition">
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Account Number</label>
+          <input name="account_number" required maxlength="10" placeholder="0123456789" class="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-brand-400 outline-none transition">
+        </div>
+        <div>
+          <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Account Name</label>
+          <input name="account_name" required placeholder="John Doe" class="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-brand-400 outline-none transition">
+        </div>
+      </div>
+      <div class="p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+        <button type="button" data-dialog-close class="px-5 py-2.5 text-sm font-bold text-slate-500 hover:text-slate-800">Cancel</button>
+        <button class="px-6 py-2.5 bg-slate-900 hover:bg-black text-white rounded-xl text-sm font-bold shadow-soft">Save Bank Info</button>
+      </div>
+    </form>
+  {% else %}
+    <form method="POST" action="/vendor/withdraw" class="bg-white">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="p-6 border-b border-slate-100">
+        <h3 class="text-xl font-black text-slate-900">Withdraw Funds</h3>
+        <p class="text-sm text-slate-500 mt-1">Available: <b class="text-emerald-600">₦{{ "{:,.2f}".format(shop.wallet_balance) }}</b></p>
+        <p class="text-xs text-slate-400 mt-1">To: {{ bank.account_name }} ({{ bank.account_number }})</p>
+      </div>
+      <div class="p-6 space-y-4">
+        <div>
+          <label class="text-xs font-bold text-slate-600 uppercase tracking-wide">Amount (₦)</label>
+          <input name="amount" type="number" step="0.01" max="{{ shop.wallet_balance }}" required placeholder="0.00" class="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-emerald-400 outline-none transition text-2xl font-black">
+        </div>
+      </div>
+      <div class="p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+        <button type="button" data-dialog-close class="px-5 py-2.5 text-sm font-bold text-slate-500 hover:text-slate-800">Cancel</button>
+        <button class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold shadow-soft">Request Payout</button>
+      </div>
+    </form>
+  {% endif %}
 </dialog>
 
 {% endblock %}
 
 {% block scripts %}
+<style>
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+</style>
 <script nonce="{{ csp_nonce }}">
-  // FIX 4: Global Dialog Handlers (This makes your data-dialog-open buttons work)
+  // Dialog handling
   document.querySelectorAll('[data-dialog-open]').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
@@ -330,12 +492,10 @@
   });
 
   document.querySelectorAll('[data-dialog-close]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      btn.closest('dialog').close();
-    });
+    btn.addEventListener('click', () => btn.closest('dialog').close());
   });
 
-  // Handle Editing Product
+  // Edit Product function
   window.openEditProduct = function(product) {
     document.getElementById('edit-prod-form').action = `/vendor/product/edit/${product.id}`;
     document.getElementById('edit-p-name').value = product.name;
@@ -345,54 +505,46 @@
     document.getElementById('edit-prod-modal').showModal();
   }
 
-  // 1. Handle Tab Switching
+  // Tabs
   document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".panel").forEach(p => p.classList.add("hidden"));
       document.querySelector(`[data-panel="${btn.dataset.tab}"]`).classList.remove("hidden");
       document.querySelectorAll(".tab-btn").forEach(b => {
-        b.classList.remove("bg-slate-100", "font-bold");
-        b.classList.add("text-slate-600");
+        b.classList.remove("bg-white/10", "text-white");
+        b.classList.add("text-slate-400");
       });
-      btn.classList.add("bg-slate-100", "font-bold");
-      btn.classList.remove("text-slate-600");
+      btn.classList.remove("text-slate-400");
+      btn.classList.add("bg-white/10", "text-white");
     });
   });
   
-  // Default to the first tab
+  // Default tab
   document.querySelector(".tab-btn")?.click();
 
-  // 2. Handle Reel Upload with Paystack
+  // Reel Upload with Paystack
   const reelForm = document.getElementById("reel-form");
   if (reelForm) {
     reelForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       const btn = document.getElementById("reel-submit-btn");
       const originalText = btn.innerHTML;
-      
       btn.innerHTML = "Processing...";
       btn.disabled = true;
 
       const formData = new FormData(reelForm);
-      
       try {
-        const res = await fetch("/dashboard/reel/upload", {
-          method: "POST",
-          body: formData
-        });
-        
+        const res = await fetch("/dashboard/reel/upload", { method: "POST", body: formData });
         const data = await res.json();
-        
         if (res.ok && data.authorization_url) {
-          // Redirect to Paystack Checkout
           window.location.href = data.authorization_url;
         } else {
-          alert(data.error || "Upload failed. Please check your video file.");
+          alert(data.error || "Upload failed.");
           btn.innerHTML = originalText;
           btn.disabled = false;
         }
       } catch (err) {
-        alert("Network error. Please try again.");
+        alert("Network error.");
         btn.innerHTML = originalText;
         btn.disabled = false;
       }

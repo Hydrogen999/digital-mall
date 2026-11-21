@@ -12,6 +12,8 @@ from decimal import Decimal, InvalidOperation
 from functools import wraps
 from urllib.parse import quote
 
+from itsdangerous import URLSafeTimedSerializer
+
 import click
 import cloudinary
 import cloudinary.uploader
@@ -119,11 +121,13 @@ app.config.update(
 db.init_app(app)
 socketio.init_app(app)
 
+# --- FIXED: Mail & Serializer are now OUTSIDE the config dictionary ---
+mail = Mail(app)
+serializer = URLSafeTimedSerializer(SECRET_KEY)
+
 _hops = int(os.environ.get("TRUST_PROXY_HOPS", "1" if IS_PROD else "0"))
 if _hops:
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=_hops, x_proto=_hops, x_host=_hops)
-
-mail = Mail(app)
 
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
@@ -226,7 +230,7 @@ def admin_required(fn):
 
 
 # ==================================================================
-# EMAIL
+# EMAIL & UPLOADS
 # ==================================================================
 def send_email(to_email, subject, html_body):
     if not app.config["MAIL_USERNAME"]:
@@ -239,9 +243,6 @@ def send_email(to_email, subject, html_body):
         log.exception("Email failed to send")
 
 
-# ==================================================================
-# UPLOADS
-# ==================================================================
 def upload_public(stream, kind: str):
     if stream is None:
         return None
@@ -456,7 +457,7 @@ app.before_request(csrf_protect)
 _last_maintenance = 0.0
 
 
-s
+# --- FIXED: Removed the stray 's' before the decorator ---
 @app.before_request
 def maintenance():
     """Expire subscriptions, release stock, and auto-release escrow (runs once a minute)."""
@@ -483,7 +484,6 @@ def maintenance():
             restock_order(order)
             
         # 3. Auto-Release Escrow (7 days after shipping)
-        # If an item was shipped more than 7 days ago, auto-mark as DELIVERED and pay the vendor.
         seven_days_ago = now - timedelta(days=7)
         old_shipped_items = OrderItem.query.filter(
             OrderItem.status == "SHIPPED",
@@ -492,7 +492,6 @@ def maintenance():
         
         for item in old_shipped_items:
             item.status = "DELIVERED"
-            # Release funds to vendor
             payout = round(item.price * item.qty * (1 - PLATFORM_COMMISSION), 2)
             Shop.query.filter_by(id=item.shop_id).update(
                 {Shop.wallet_balance: Shop.wallet_balance + payout}, synchronize_session=False
@@ -622,6 +621,72 @@ def logout():
 
 
 # ==================================================================
+# PASSWORD RESET
+# ==================================================================
+@app.route("/reset-password", methods=["GET", "POST"])
+def reset_request():
+    if current_user.is_authenticated:
+        return redirect(url_for("home"))
+        
+    if request.method == "POST":
+        email = clip(request.form.get("email"), 120).lower()
+        user = User.query.filter_by(email=email).first()
+        
+        if user:
+            token = serializer.dumps(user.email, salt='password-reset')
+            reset_url = url_for("reset_token", token=token, _external=True)
+            
+            send_email(
+                user.email,
+                "Reset Your Mall Password",
+                f"""
+                <h2>Password Reset Request</h2>
+                <p>Hi {escape(user.username)},</p>
+                <p>We received a request to reset your password. Click the link below to choose a new one. This link expires in 1 hour.</p>
+                <p><a href="{escape(reset_url)}" style="padding: 10px 20px; background: #f59e0b; color: white; text-decoration: none; border-radius: 5px; display: inline-block;">Reset Password</a></p>
+                <p>If you didn't request this, you can safely ignore this email.</p>
+                """
+            )
+            
+        flash("If that email is registered, a reset link has been sent.", "success")
+        return redirect(url_for("login"))
+        
+    return render_template("reset_request.html")
+
+
+@app.route("/reset-password/<token>", methods=["GET", "POST"])
+def reset_token(token):
+    if current_user.is_authenticated:
+        return redirect(url_for("home"))
+        
+    try:
+        email = serializer.loads(token, salt='password-reset', max_age=3600)
+    except Exception:
+        flash("The password reset link is invalid or has expired.", "error")
+        return redirect(url_for("reset_request"))
+        
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        flash("User not found.", "error")
+        return redirect(url_for("reset_request"))
+
+    if request.method == "POST":
+        password = request.form.get("password") or ""
+        
+        if not (10 <= len(password) <= 128):
+            flash("Password must be between 10 and 128 characters.", "error")
+            return render_template("reset_password.html", token=token)
+            
+        user.password_hash = generate_password_hash(password)
+        db.session.commit()
+        
+        flash("Your password has been updated! You can now log in.", "success")
+        return redirect(url_for("login"))
+
+    return render_template("reset_password.html", token=token)
+
+
+# ==================================================================
 # PUBLIC ROUTES
 # ==================================================================
 def _count_view(model, obj_id):
@@ -651,10 +716,10 @@ def search():
     if category:
         query = query.filter(Product.shop.has(Shop.category == category))
         
-    # Paginate: 12 items per page
     pagination = query.order_by(Product.created_at.desc()).paginate(page=page, per_page=12, error_out=False)
     
     return render_template("search.html", products=pagination.items, pagination=pagination, q=q, category=category)
+
 
 @app.route("/shop/<slug>")
 def shop_page(slug):
@@ -665,10 +730,10 @@ def shop_page(slug):
     reviews = Review.query.filter_by(shop_id=shop.id).order_by(Review.created_at.desc()).limit(100).all()
     avg_rating = sum(r.rating for r in reviews) / len(reviews) if reviews else 0.0
     
-    # Paginate products: 12 per page
     pagination = Product.query.filter_by(shop_id=shop.id, is_active=True).order_by(Product.created_at.desc()).paginate(page=page, per_page=12, error_out=False)
     
     return render_template("shop.html", shop=shop, reviews=reviews, avg_rating=avg_rating, products=pagination.items, pagination=pagination)
+
 
 @app.route("/shop/<slug>/review", methods=["POST"])
 @login_required

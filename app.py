@@ -5,6 +5,8 @@ import logging
 import os
 import re
 import secrets
+import shutil
+import tempfile
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -252,32 +254,46 @@ def send_email(to_email, subject, html_body):
         log.exception("Email failed to send")
 
 
+def _send_to_cloudinary(stream, kind: str, **options):
+    """
+    Copy the (already validated) upload to a temp file and send that to Cloudinary.
+    Videos use chunked upload, which is far more reliable for large files than one big request.
+    On failure returns None and stores a short reason in g.upload_error (also written to the log).
+    """
+    g.upload_error = None
+    suffix = os.path.splitext(getattr(stream, "name", "") or "")[1] or (".mp4" if kind == "video" else "")
+    path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            shutil.copyfileobj(stream, tmp)
+            path = tmp.name
+        if kind == "video":
+            return cloudinary.uploader.upload_large(path, resource_type="video", chunk_size=6_000_000, **options)
+        return cloudinary.uploader.upload(path, resource_type="image", **options)
+    except Exception as exc:
+        g.upload_error = (str(exc) or exc.__class__.__name__)[:200]
+        log.exception("Cloudinary upload failed (%s): %s", kind, g.upload_error)
+        return None
+    finally:
+        if path and os.path.exists(path):
+            os.unlink(path)
+
+
 def upload_public(stream, kind: str):
+    """Upload an already-validated stream to Cloudinary. Returns secure_url or None."""
     if stream is None:
         return None
-    try:
-        res = cloudinary.uploader.upload(
-            stream, resource_type="video" if kind == "video" else "image",
-            folder="mall", unique_filename=True, overwrite=False,
-        )
-        return res.get("secure_url")
-    except Exception:
-        log.exception("Cloudinary upload failed")
-        return None
+    res = _send_to_cloudinary(stream, kind, folder="mall", unique_filename=True, overwrite=False)
+    return res.get("secure_url") if res else None
 
 
 def upload_private_id(stream):
+    """KYC documents are stored as 'authenticated' assets - not reachable by a plain URL."""
     if stream is None:
         return None
-    try:
-        res = cloudinary.uploader.upload(
-            stream, resource_type="image", type="authenticated",
-            folder="mall_kyc", unique_filename=True, overwrite=False,
-        )
-        return "private:" + res["public_id"]
-    except Exception:
-        log.exception("Cloudinary private upload failed")
-        return None
+    res = _send_to_cloudinary(stream, "image", type="authenticated", folder="mall_kyc",
+                              unique_filename=True, overwrite=False)
+    return ("private:" + res["public_id"]) if res else None
 
 
 @app.template_filter("kyc_url")
@@ -1245,7 +1261,7 @@ def store_image(f, label):
         return None, f"{label} must be a real JPG, PNG, WEBP or GIF image under 15MB."
     url = upload_public(stream, "image")
     if not url:
-        return None, f"{label} upload failed. Please try again (details are in the server log)."
+        return None, f"{label} upload failed: {g.get('upload_error') or 'unknown error'}"
     return url, None
 
 
@@ -1384,7 +1400,7 @@ def upload_reel():
 
     video_url = upload_public(video_stream, "video")
     if not video_url:
-        return jsonify({"error": "Video upload failed."}), 500
+        return jsonify({"error": f"Video upload failed: {g.get('upload_error') or 'unknown error'}"}), 500
 
     reel = Reel(shop_id=shop.id, video_url=video_url, poster_url=upload_public(poster_stream, "image"),
                 caption=clip_text(request.form.get("caption"), 300), product_id=product_id,

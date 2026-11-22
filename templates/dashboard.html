@@ -30,9 +30,17 @@
   </div>
 
   <div class="max-w-7xl mx-auto px-4 py-8">
+          <!-- MOBILE TABS (Only visible on small screens) -->
+      <div class="lg:hidden flex overflow-x-auto gap-2 pb-2 mb-4 no-scrollbar">
+        <button data-tab="products" class="tab-btn flex-1 shrink-0 px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-900 shadow-sm whitespace-nowrap">Products</button>
+        <button data-tab="orders" class="tab-btn flex-1 shrink-0 px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-500 shadow-sm whitespace-nowrap">Orders</button>
+        <button data-tab="messages" class="tab-btn flex-1 shrink-0 px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-500 shadow-sm whitespace-nowrap">Messages</button>
+        <button data-tab="reels" class="tab-btn flex-1 shrink-0 px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-500 shadow-sm whitespace-nowrap">Reels</button>
+      </div>
     <div class="grid lg:grid-cols-[260px,1fr] gap-8 items-start">
       
       <!-- ═══════════════ SIDEBAR ═══════════════ -->
+           <!-- SIDEBAR (Hidden on mobile) -->
       <aside class="bg-slate-900 rounded-3xl p-3 shadow-float sticky top-24 hidden lg:block">
         <div class="space-y-1">
           <button data-tab="products" class="tab-btn w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-medium text-slate-400 hover:text-white hover:bg-white/10 transition-all text-left">

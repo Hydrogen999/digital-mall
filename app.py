@@ -1732,4 +1732,4 @@ with app.app_context():
 if __name__ == "__main__":
     dev = APP_ENV == "development"
     socketio.run(app, debug=dev, host="127.0.0.1" if dev else "0.0.0.0",
-                 port=int(os.environ.get("PORT", 5000)), allow_unsafe_werkzeug=dev)~
+                 port=int(os.environ.get("PORT", 5000)), allow_unsafe_werkzeug=dev)

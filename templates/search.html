@@ -1,39 +1,96 @@
 {% extends "base.html" %}
+{% block title %}Search Results · Mall{% endblock %}
+
 {% block content %}
 <div class="max-w-7xl mx-auto px-4 py-8">
-  <h1 class="text-2xl font-bold mb-6">Search Results {% if q %}for "{{ q }}"{% endif %}</h1>
   
+  <!-- Header -->
+  <div class="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
+    <div>
+      <h1 class="text-3xl font-black text-slate-900">
+        {% if q %}Results for "{{ q }}"{% elif category %}{{ category }}{% else %}All Products{% endif %}
+      </h1>
+      <p class="text-slate-500 mt-1">{{ pagination.total }} items found</p>
+    </div>
+  </div>
+
+  <!-- Filter Bar -->
+  <form method="GET" action="/search" class="bg-white rounded-2xl border border-slate-200 p-4 mb-8 shadow-soft flex flex-wrap items-center gap-4">
+    <!-- Keep the search query and category hidden so they aren't lost -->
+    {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
+    {% if category %}<input type="hidden" name="category" value="{{ category }}">{% endif %}
+
+    <div class="flex items-center gap-2">
+      <label class="text-xs font-bold text-slate-500 uppercase">Price (₦):</label>
+      <input type="number" name="min_price" value="{{ min_price or '' }}" placeholder="Min" class="w-24 px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:ring-2 focus:ring-brand-400 outline-none">
+      <span class="text-slate-400">-</span>
+      <input type="number" name="max_price" value="{{ max_price or '' }}" placeholder="Max" class="w-24 px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:ring-2 focus:ring-brand-400 outline-none">
+    </div>
+
+    <div class="flex items-center gap-2">
+      <label class="text-xs font-bold text-slate-500 uppercase">Sort by:</label>
+      <select name="sort" class="px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:ring-2 focus:ring-brand-400 outline-none bg-white font-medium">
+        <option value="newest" {{ 'selected' if sort_by == 'newest' }}>Newest First</option>
+        <option value="price_asc" {{ 'selected' if sort_by == 'price_asc' }}>Price: Low to High</option>
+        <option value="price_desc" {{ 'selected' if sort_by == 'price_desc' }}>Price: High to Low</option>
+      </select>
+    </div>
+
+    <button type="submit" class="px-5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-bold shadow-sm transition ml-auto">
+      Apply Filters
+    </button>
+    <a href="/search" class="text-sm font-semibold text-slate-400 hover:text-slate-700">Clear</a>
+  </form>
+
+  <!-- Products Grid -->
   {% if products %}
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
       {% for p in products %}
-        <a href="/product/{{ p.id }}" class="bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-lg transition">
-          <div class="aspect-square bg-slate-100"><img src="{{ p.image or 'https://via.placeholder.com/400' }}" class="w-full h-full object-cover"></div>
-          <div class="p-3">
-            <div class="text-sm font-medium truncate">{{ p.name }}</div>
-            <div class="text-xs text-slate-500">{{ p.shop.name }}</div>
-            <div class="font-bold text-amber-600 mt-1">₦{{ "{:,.2f}".format(p.price) }}</div>
+        <div class="group bg-white rounded-3xl border border-slate-200/80 overflow-hidden hover:shadow-float hover:border-brand-200 transition-all duration-300 flex flex-col">
+          <a href="/product/{{ p.id }}" class="aspect-[4/5] bg-slate-100 relative overflow-hidden block">
+            {% if p.image %}
+              <img src="{{ p.image }}" alt="{{ p.name }}" class="w-full h-full object-cover group-hover:scale-105 transition duration-500">
+            {% endif %}
+          </a>
+          <div class="p-4 flex-1 flex flex-col">
+            <p class="text-[10px] font-bold text-brand-600 uppercase tracking-widest mb-1">{{ p.shop.name }}</p>
+            <h3 class="font-bold text-slate-900 truncate group-hover:text-brand-600 transition">{{ p.name }}</h3>
+            <div class="mt-auto pt-3 flex items-center justify-between">
+              <div class="font-black text-lg text-slate-900">₦{{ "{:,.0f}".format(p.price) }}</div>
+              <button data-add-to-cart='{{ {"id": p.id, "name": p.name, "price": p.price, "image": p.image} | tojson }}' class="w-9 h-9 rounded-full bg-slate-100 hover:bg-brand-500 hover:text-white text-slate-600 flex items-center justify-center transition-all duration-300">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+              </button>
+            </div>
           </div>
-        </a>
+        </div>
       {% endfor %}
     </div>
 
-    <!-- PAGINATION CONTROLS -->
+    <!-- Pagination (Keeps filters intact) -->
     {% if pagination.pages > 1 %}
-      <div class="flex justify-center items-center gap-2 mt-10">
+      <div class="flex justify-center items-center gap-2 mt-12">
         {% if pagination.has_prev %}
-          <a href="?q={{ q }}&category={{ category }}&page={{ pagination.prev_num }}" class="px-4 py-2 border rounded-lg hover:bg-slate-50 font-semibold text-sm">← Previous</a>
+          <a href="{{ url_for('search', q=q, category=category, min_price=min_price, max_price=max_price, sort=sort_by, page=pagination.prev_num) }}" class="px-5 py-2.5 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 font-bold text-sm transition shadow-sm">← Prev</a>
         {% endif %}
-        
-        <span class="text-sm text-slate-500 font-medium px-4">Page {{ pagination.page }} of {{ pagination.pages }}</span>
-        
+        <span class="text-sm font-semibold text-slate-500 px-4">Page {{ pagination.page }} of {{ pagination.pages }}</span>
         {% if pagination.has_next %}
-          <a href="?q={{ q }}&category={{ category }}&page={{ pagination.next_num }}" class="px-4 py-2 border rounded-lg hover:bg-slate-50 font-semibold text-sm">Next →</a>
+          <a href="{{ url_for('search', q=q, category=category, min_price=min_price, max_price=max_price, sort=sort_by, page=pagination.next_num) }}" class="px-5 py-2.5 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 font-bold text-sm transition shadow-sm">Next →</a>
         {% endif %}
       </div>
     {% endif %}
 
   {% else %}
-    <p class="text-slate-500 py-20 text-center">No products found matching your search.</p>
+    <div class="text-center py-24 bg-white rounded-3xl border border-dashed border-slate-300">
+      <p class="text-5xl mb-4">🔍</p>
+      <h3 class="text-xl font-bold text-slate-900 mb-1">No results found</h3>
+      <p class="text-slate-500">Try adjusting your filters or search terms.</p>
+    </div>
   {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+  // Re-use the global add to cart script from base.html
+</script>
 {% endblock %}

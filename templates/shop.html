@@ -63,8 +63,18 @@
 
 <!-- ═══════════════ PRODUCTS GRID ═══════════════ -->
 <section class="max-w-7xl mx-auto px-4 py-12">
-  <div class="flex items-center justify-between mb-8">
+   <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-8 gap-4">
     <h2 class="text-2xl font-black text-slate-900">All Products</h2>
+    
+    <!-- Sort Form -->
+    <form method="GET" action="/shop/{{ shop.slug }}" class="flex items-center gap-2">
+      <label class="text-xs font-bold text-slate-500 uppercase">Sort by:</label>
+      <select name="sort" onchange="this.form.submit()" class="px-3 py-2 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-brand-400 outline-none bg-white font-medium shadow-sm cursor-pointer">
+        <option value="newest" {{ 'selected' if sort_by == 'newest' }}>Newest First</option>
+        <option value="price_asc" {{ 'selected' if sort_by == 'price_asc' }}>Price: Low to High</option>
+        <option value="price_desc" {{ 'selected' if sort_by == 'price_desc' }}>Price: High to Low</option>
+      </select>
+    </form>
   </div>
 
   {% if products %}
@@ -97,27 +107,18 @@
       {% endfor %}
     </div>
 
-    <!-- PAGINATION -->
+       <!-- PAGINATION (Updated to keep sort) -->
     {% if pagination.pages > 1 %}
       <div class="flex justify-center items-center gap-2 mt-12">
         {% if pagination.has_prev %}
-          <a href="{{ url_for('shop_page', slug=shop.slug, page=pagination.prev_num) }}" class="px-5 py-2.5 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 font-bold text-sm transition shadow-sm">← Previous</a>
+          <a href="{{ url_for('shop_page', slug=shop.slug, page=pagination.prev_num, sort=sort_by) }}" class="px-5 py-2.5 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 font-bold text-sm transition shadow-sm">← Previous</a>
         {% endif %}
         <span class="text-sm font-semibold text-slate-500 px-4">Page {{ pagination.page }} of {{ pagination.pages }}</span>
         {% if pagination.has_next %}
-          <a href="{{ url_for('shop_page', slug=shop.slug, page=pagination.next_num) }}" class="px-5 py-2.5 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 font-bold text-sm transition shadow-sm">Next →</a>
+          <a href="{{ url_for('shop_page', slug=shop.slug, page=pagination.next_num, sort=sort_by) }}" class="px-5 py-2.5 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 font-bold text-sm transition shadow-sm">Next →</a>
         {% endif %}
       </div>
     {% endif %}
-
-  {% else %}
-    <div class="text-center py-24 bg-white rounded-3xl border border-dashed border-slate-300">
-      <p class="text-5xl mb-4">🛍️</p>
-      <h3 class="text-xl font-bold text-slate-900 mb-1">No products yet</h3>
-      <p class="text-slate-500">This vendor hasn't added any products.</p>
-    </div>
-  {% endif %}
-</section>
 
 <!-- ═══════════════ REVIEWS ═══════════════ -->
 <section class="max-w-7xl mx-auto px-4 pb-24">

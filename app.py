@@ -777,17 +777,61 @@ def search():
     category = clip(request.args.get("category"), 60)
     page = request.args.get("page", 1, type=int)
     
+    # NEW: Price and Sort filters
+    min_price = request.args.get("min_price", type=float)
+    max_price = request.args.get("max_price", type=float)
+    sort_by = request.args.get("sort", "newest")
+
     query = Product.query.filter_by(is_active=True).join(Shop).filter(Shop.is_approved.is_(True))
+    
     if q:
         like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
         query = query.filter(Product.name.ilike(like, escape="\\") | Product.description.ilike(like, escape="\\"))
     if category:
         query = query.filter(Product.shop.has(Shop.category == category))
-        
-    pagination = query.order_by(Product.created_at.desc()).paginate(page=page, per_page=12, error_out=False)
-    
-    return render_template("search.html", products=pagination.items, pagination=pagination, q=q, category=category)
+    if min_price is not None:
+        query = query.filter(Product.price >= min_price)
+    if max_price is not None:
+        query = query.filter(Product.price <= max_price)
 
+    # Sorting Logic
+    if sort_by == "price_asc":
+        query = query.order_by(Product.price.asc())
+    elif sort_by == "price_desc":
+        query = query.order_by(Product.price.desc())
+    else:
+        query = query.order_by(Product.created_at.desc()) # Default
+
+    pagination = query.paginate(page=page, per_page=12, error_out=False)
+    
+    return render_template("search.html", products=pagination.items, pagination=pagination, q=q, category=category, 
+                           min_price=min_price, max_price=max_price, sort_by=sort_by)
+
+
+@app.route("/shop/<slug>")
+def shop_page(slug):
+    shop = Shop.query.filter_by(slug=slug[:140], is_approved=True).first_or_404()
+    _count_view(Shop, shop.id)
+    page = request.args.get("page", 1, type=int)
+    sort_by = request.args.get("sort", "newest")
+
+    reviews = Review.query.filter_by(shop_id=shop.id).order_by(Review.created_at.desc()).limit(100).all()
+    avg_rating = sum(r.rating for r in reviews) / len(reviews) if reviews else 0.0
+    
+    query = Product.query.filter_by(shop_id=shop.id, is_active=True)
+    
+    # Sorting Logic for Shop
+    if sort_by == "price_asc":
+        query = query.order_by(Product.price.asc())
+    elif sort_by == "price_desc":
+        query = query.order_by(Product.price.desc())
+    else:
+        query = query.order_by(Product.created_at.desc())
+
+    pagination = query.paginate(page=page, per_page=12, error_out=False)
+    
+    return render_template("shop.html", shop=shop, reviews=reviews, avg_rating=avg_rating, 
+                           products=pagination.items, pagination=pagination, sort_by=sort_by)
 
 @app.route("/shop/<slug>")
 def shop_page(slug):

@@ -1068,11 +1068,50 @@ def payment_success(reference):
     return render_template("payment_success.html", order=order)
 
 
-@app.route("/orders")
+@app.route("/profile", methods=["GET", "POST"])
 @login_required
-def orders():
-    my_orders = Order.query.filter_by(customer_id=current_user.id).order_by(Order.created_at.desc()).all()
-    return render_template("orders.html", orders=my_orders)
+def profile():
+    if current_user.role == "vendor":
+        return redirect(url_for("dashboard")) # Vendors use the vendor dashboard
+        
+    if request.method == "POST":
+        action = request.form.get("action")
+        
+        if action == "update_info":
+            new_username = clip(request.form.get("username"), 50)
+            new_email = clip(request.form.get("email"), 120).lower()
+            new_phone = normalize_phone(request.form.get("phone"))
+            
+            if not USERNAME_RE.match(new_username) or not EMAIL_RE.match(new_email):
+                flash("Invalid name or email format.", "error")
+            elif User.query.filter(User.id != current_user.id, (User.email == new_email) | (db.func.lower(User.username) == new_username.lower())).first():
+                flash("That email or username is already taken.", "error")
+            else:
+                current_user.username = new_username
+                current_user.email = new_email
+                current_user.phone = new_phone
+                db.session.commit()
+                flash("Profile updated successfully!", "success")
+                return redirect(url_for("profile"))
+                
+        elif action == "change_password":
+            current_pw = request.form.get("current_password") or ""
+            new_pw = request.form.get("new_password") or ""
+            
+            if not check_password_hash(current_user.password_hash, current_pw):
+                flash("Current password is incorrect.", "error")
+            elif not (10 <= len(new_pw) <= 128):
+                flash("New password must be at least 10 characters.", "error")
+            else:
+                current_user.password_hash = generate_password_hash(new_pw)
+                db.session.commit()
+                flash("Password changed successfully!", "success")
+                return redirect(url_for("profile"))
+
+    my_orders_count = Order.query.filter_by(customer_id=current_user.id).count()
+    wishlist_count = Wishlist.query.filter_by(user_id=current_user.id).count()
+    
+    return render_template("profile.html", orders_count=my_orders_count, wishlist_count=wishlist_count)
 
 
 @app.route("/order/confirm-delivery/<int:item_id>", methods=["POST"])

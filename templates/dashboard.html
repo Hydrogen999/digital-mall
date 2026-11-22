@@ -106,7 +106,8 @@
         <!-- 1. PRODUCTS -->
         <div data-panel="products" class="panel hidden animate-fade-in">
           <div class="flex items-center justify-between mb-6">
-            <h2 class="text-xl font-black text-slate-900">Your Inventory</h2>
+            <div><h2 class="text-xl font-black text-slate-900">Your Inventory</h2>
+              <p class="text-xs text-slate-500 mt-1">{{ "{:,}".format(product_pagination.total) }} of {{ "{:,}".format(max_products) }} products</p></div>
             <button data-dialog-open="add-prod" class="bg-brand-500 hover:bg-brand-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-soft transition flex items-center gap-2">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
               Add Product
@@ -149,6 +150,18 @@
               </div>
             {% endif %}
           </div>
+
+          {% if product_pagination.pages > 1 %}
+          <div class="flex items-center justify-center gap-3 mt-8">
+            {% if product_pagination.has_prev %}
+              <a href="{{ url_for('dashboard', page=product_pagination.prev_num) }}" class="px-5 py-2.5 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 font-bold text-sm transition shadow-sm">← Previous</a>
+            {% endif %}
+            <span class="text-sm text-slate-500 font-medium px-3">Page {{ product_pagination.page }} of {{ product_pagination.pages }}</span>
+            {% if product_pagination.has_next %}
+              <a href="{{ url_for('dashboard', page=product_pagination.next_num) }}" class="px-5 py-2.5 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 font-bold text-sm transition shadow-sm">Next →</a>
+            {% endif %}
+          </div>
+          {% endif %}
         </div>
 
         <!-- 2. ORDERS -->

@@ -61,6 +61,8 @@ IS_PROD = APP_ENV != "development"
 CSP_MODE = os.environ.get("CSP_MODE", "report-only").lower()
 
 ACTIVATION_FEE_NGN = 10000
+MAX_PRODUCTS_PER_SHOP = 10_000     # live (non-deleted) products one shop may have
+DASHBOARD_PRODUCTS_PER_PAGE = 24
 PLATFORM_COMMISSION = 0.05
 REEL_PROMO_FEE_NGN = 10000
 PENDING_ORDER_TTL = timedelta(hours=2)
@@ -1241,14 +1243,21 @@ def dashboard():
     if shop.verification_status != "ACTIVE":
         return redirect(url_for("vendor_status"))
 
-    products = Product.query.filter_by(shop_id=shop.id).order_by(Product.created_at.desc()).all()
+    # Paginated: a shop can hold up to MAX_PRODUCTS_PER_SHOP products, far too many to render at once.
+    # Deleted (inactive) products are hidden here; they are only soft-deleted so old orders still work.
+    product_pagination = (Product.query.filter_by(shop_id=shop.id, is_active=True)
+                          .order_by(Product.created_at.desc())
+                          .paginate(page=request.args.get("page", 1, type=int),
+                                    per_page=DASHBOARD_PRODUCTS_PER_PAGE, error_out=False))
+    products = product_pagination.items
     convos = Conversation.query.filter_by(shop_id=shop.id).order_by(Conversation.created_at.desc()).all()
     order_items = OrderItem.query.filter_by(shop_id=shop.id).order_by(OrderItem.id.desc()).all()
     reels = Reel.query.filter_by(shop_id=shop.id).order_by(Reel.created_at.desc()).all()
     days_left = max(0, (shop.subscription_expires_at - datetime.utcnow()).days) if shop.subscription_expires_at else 0
     total_sales = sum(i.price * i.qty for i in order_items if i.status in ["PAID", "SHIPPED", "DELIVERED"])
     return render_template("dashboard.html", shop=shop, products=products, order_items=order_items,
-                           convos=convos, reels=reels, days_left=days_left, total_sales=total_sales)
+                           convos=convos, reels=reels, days_left=days_left, total_sales=total_sales,
+                           product_pagination=product_pagination, max_products=MAX_PRODUCTS_PER_SHOP)
 
 
 @app.route("/vendor/ship/<int:item_id>", methods=["POST"])
@@ -1289,10 +1298,14 @@ def store_image(f, label):
 
 @app.route("/vendor/product/add", methods=["POST"])
 @login_required
-@rate_limit(30, 3600, "addproduct", per_user=True)
+@rate_limit(200, 3600, "addproduct", per_user=True)   # generous: sellers add catalogues in bulk
 def add_product():
     shop = _active_vendor_shop()
     if not shop:
+        return redirect(url_for("dashboard"))
+    live_count = Product.query.filter_by(shop_id=shop.id, is_active=True).count()
+    if live_count >= MAX_PRODUCTS_PER_SHOP:
+        flash(f"You have reached the limit of {MAX_PRODUCTS_PER_SHOP:,} products. Remove some to add more.", "error")
         return redirect(url_for("dashboard"))
     name = clip(request.form.get("name"), 200)
     price = parse_money(request.form.get("price"), 1, 100_000_000)

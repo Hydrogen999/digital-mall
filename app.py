@@ -41,7 +41,7 @@ except ImportError:
 
 from models import (
     Conversation, Order, OrderItem, Product, Reel, ReelLike, Review,
-    Shop, User, Wishlist, Withdrawal, db,
+    Shop, User, Wishlist, Withdrawal, BankAccount, db,
 )
 from security import (
     apply_security_headers, client_ip, csrf_protect, csrf_token, limiter,
@@ -61,7 +61,7 @@ IS_PROD = APP_ENV != "development"
 CSP_MODE = os.environ.get("CSP_MODE", "report-only").lower()
 
 ACTIVATION_FEE_NGN = 10000
-MAX_PRODUCTS_PER_SHOP = 10_000     # live (non-deleted) products one shop may have
+MAX_PRODUCTS_PER_SHOP = 10_000
 DASHBOARD_PRODUCTS_PER_PAGE = 24
 PLATFORM_COMMISSION = 0.05
 REEL_PROMO_FEE_NGN = 10000
@@ -94,10 +94,8 @@ def cloudinary_ready() -> bool:
     c = cloudinary.config()
     return bool(c.cloud_name and c.api_key and c.api_secret)
 
-
 if not cloudinary_ready():
-    log.warning("CLOUDINARY IS NOT CONFIGURED: image/video uploads will fail. "
-                "Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET in your .env file.")
+    log.warning("CLOUDINARY IS NOT CONFIGURED: image/video uploads will fail.")
 
 db_url = os.environ.get("DATABASE_URL", "sqlite:///mall.db")
 if db_url.startswith("postgres://"):
@@ -112,7 +110,7 @@ app.config.update(
     SQLALCHEMY_DATABASE_URI=db_url,
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
     SQLALCHEMY_ENGINE_OPTIONS={"poolclass": NullPool, "pool_pre_ping": True},
-    MAX_CONTENT_LENGTH=64 * 1024 * 1024,   # videos up to 50MB + form fields
+    MAX_CONTENT_LENGTH=64 * 1024 * 1024,
     MAX_FORM_MEMORY_SIZE=1024 * 1024,
     MAX_FORM_PARTS=200,
     SESSION_COOKIE_NAME="__Host-mall" if IS_PROD else "mall",
@@ -134,7 +132,6 @@ app.config.update(
 db.init_app(app)
 socketio.init_app(app)
 
-# --- FIXED: Mail & Serializer are now OUTSIDE the config dictionary ---
 mail = Mail(app)
 serializer = URLSafeTimedSerializer(SECRET_KEY)
 
@@ -148,7 +145,6 @@ login_manager.login_message = "Please sign in to continue."
 login_manager.login_message_category = "error"
 login_manager.session_protection = "basic"
 
-
 @login_manager.user_loader
 def load_user(uid):
     try:
@@ -156,21 +152,17 @@ def load_user(uid):
     except (TypeError, ValueError):
         return None
 
-
 # ==================================================================
 # GENERIC HELPERS
 # ==================================================================
 _CTRL = re.compile(r"[\x00-\x1f\x7f]")
 
-
 def clip(value, n: int) -> str:
     return _CTRL.sub("", (value or "")).strip()[:n]
-
 
 def clip_text(value, n: int) -> str:
     s = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", (value or "")).strip()
     return s[:n]
-
 
 def parse_int(raw, lo, hi):
     try:
@@ -178,7 +170,6 @@ def parse_int(raw, lo, hi):
     except (TypeError, ValueError):
         return None
     return v if lo <= v <= hi else None
-
 
 def parse_money(raw, lo: float, hi: float):
     try:
@@ -192,11 +183,9 @@ def parse_money(raw, lo: float, hi: float):
         return None
     return float(d)
 
-
 def slugify(text: str) -> str:
     text = re.sub(r"[^\w\s-]", "", (text or "").lower())
     return re.sub(r"[-\s]+", "-", text).strip("-") or "shop"
-
 
 def unique_slug(name: str) -> str:
     base = slugify(name)[:100]
@@ -206,7 +195,6 @@ def unique_slug(name: str) -> str:
         slug = f"{base}-{i}"
     return slug
 
-
 def normalize_phone(raw: str) -> str:
     digits = re.sub(r"\D", "", raw or "")
     if digits.startswith("234"):
@@ -215,21 +203,17 @@ def normalize_phone(raw: str) -> str:
         return "+234" + digits[1:]
     return digits
 
-
 def is_valid_ng_phone(raw: str) -> bool:
     digits = re.sub(r"\D", "", raw or "")
     return bool(re.match(r"^(234|0)[789][01]\d{8}$", digits))
-
 
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
 USERNAME_RE = re.compile(r"^[\w .'\-]{2,50}$")
 DUMMY_HASH = generate_password_hash(secrets.token_hex(16))
 
-
 def audit(action: str, **details):
     audit_log.info("user=%s ip=%s action=%s %s", current_user.get_id(), client_ip(), action,
                    " ".join(f"{k}={v}" for k, v in details.items()))
-
 
 def admin_required(fn):
     @wraps(fn)
@@ -240,7 +224,6 @@ def admin_required(fn):
             abort(404)
         return fn(*a, **kw)
     return wrapper
-
 
 # ==================================================================
 # EMAIL & UPLOADS
@@ -255,13 +238,7 @@ def send_email(to_email, subject, html_body):
     except Exception:
         log.exception("Email failed to send")
 
-
 def _send_to_cloudinary(stream, kind: str, **options):
-    """
-    Copy the (already validated) upload to a temp file and send that to Cloudinary.
-    Videos use chunked upload, which is far more reliable for large files than one big request.
-    On failure returns None and stores a short reason in g.upload_error (also written to the log).
-    """
     g.upload_error = None
     suffix = os.path.splitext(getattr(stream, "name", "") or "")[1] or (".mp4" if kind == "video" else "")
     path = None
@@ -280,26 +257,20 @@ def _send_to_cloudinary(stream, kind: str, **options):
         if path and os.path.exists(path):
             os.unlink(path)
 
-
 def upload_public(stream, kind: str):
-    """Upload an already-validated stream to Cloudinary. Returns secure_url or None."""
     if stream is None:
         return None
     res = _send_to_cloudinary(stream, kind, folder="mall", unique_filename=True, overwrite=False)
     return res.get("secure_url") if res else None
 
-
 def upload_private_id(stream):
-    """KYC documents are stored as 'authenticated' assets - not reachable by a plain URL."""
     if stream is None:
         return None
     res = _send_to_cloudinary(stream, "image", type="authenticated", folder="mall_kyc",
                               unique_filename=True, overwrite=False)
     return ("private:" + res["public_id"]) if res else None
 
-
 def delete_cloudinary_asset(url, resource_type="image"):
-    """Best-effort removal of an asset we uploaded (used for abandoned, unpaid reel uploads)."""
     m = re.search(r"/upload/(?:v\d+/)?(.+?)(?:\.[A-Za-z0-9]+)?$", url or "")
     if not m or not cloudinary_ready():
         return
@@ -307,7 +278,6 @@ def delete_cloudinary_asset(url, resource_type="image"):
         cloudinary.uploader.destroy(m.group(1), resource_type=resource_type, invalidate=True)
     except Exception:
         log.exception("Could not delete Cloudinary asset %s", m.group(1))
-
 
 @app.template_filter("kyc_url")
 def kyc_url_filter(value):
@@ -321,7 +291,6 @@ def kyc_url_filter(value):
         return url
     return value
 
-
 @app.template_filter("from_json")
 def from_json_filter(value):
     try:
@@ -329,17 +298,14 @@ def from_json_filter(value):
     except Exception:
         return []
 
-
 @app.template_filter("safe_url")
 def safe_url_filter(value):
     return safe_http_url(value) or ""
-
 
 # ==================================================================
 # PAYSTACK
 # ==================================================================
 PAYSTACK_BASE = "https://api.paystack.co"
-
 
 def _paystack(method, path, **kw):
     try:
@@ -351,7 +317,6 @@ def _paystack(method, path, **kw):
     except requests.RequestException:
         log.exception("Paystack request failed")
         return None
-
 
 def initialize_paystack(email, amount_ngn, callback_url, reference, metadata=None):
     r = _paystack("POST", "/transaction/initialize", json={
@@ -369,7 +334,6 @@ def initialize_paystack(email, amount_ngn, callback_url, reference, metadata=Non
             pass
     return None
 
-
 def verify_paystack(reference):
     r = _paystack("GET", f"/transaction/verify/{quote(reference, safe='')}")
     if r is None or r.status_code != 200:
@@ -383,6 +347,33 @@ def verify_paystack(reference):
         return "success", data
     return "failed", data
 
+def create_paystack_recipient(name, account_number, bank_code):
+    r = _paystack("POST", "/transferrecipient", json={
+        "type": "nuban",
+        "name": name,
+        "account_number": account_number,
+        "bank_code": bank_code,
+        "currency": "NGN"
+    })
+    if r is not None and r.status_code == 201:
+        try:
+            return r.json()["data"]["recipient_code"]
+        except (ValueError, KeyError, TypeError):
+            pass
+    log.error(f"Paystack Recipient Error: {r.text if r else 'No response'}")
+    return None
+
+def initiate_paystack_transfer(amount_ngn, recipient_code, reason):
+    r = _paystack("POST", "/transfer", json={
+        "source": "balance",
+        "amount": int(round(amount_ngn * 100)),
+        "recipient": recipient_code,
+        "reason": reason
+    })
+    if r is not None and r.status_code == 200:
+        return True, r.json()
+    log.error(f"Paystack Transfer Error: {r.text if r else 'No response'}")
+    return False, None
 
 def activate_shop(shop):
     now = datetime.utcnow()
@@ -395,7 +386,6 @@ def activate_shop(shop):
     else:
         shop.subscription_expires_at = now + timedelta(days=30)
 
-
 def restock_order(order, new_status="CANCELLED"):
     for it in order.items:
         p = db.session.get(Product, it.product_id)
@@ -403,7 +393,6 @@ def restock_order(order, new_status="CANCELLED"):
             p.stock += it.qty
         it.status = new_status
     order.status = new_status
-
 
 def apply_successful_payment(data) -> bool:
     reference = str(data.get("reference") or "")
@@ -420,12 +409,10 @@ def apply_successful_payment(data) -> bool:
         if not shop or shop.activation_ref != reference:
             return False
         if paid_kobo != ACTIVATION_FEE_NGN * 100:
-            log.warning("Activation amount mismatch ref=%s paid=%s", reference, paid_kobo)
             return False
         activate_shop(shop)
         shop.activation_ref = None
         db.session.commit()
-        log.info("Shop %s activated (ref %s)", shop.id, reference)
         return True
 
     if kind == "reel_promotion":
@@ -444,7 +431,6 @@ def apply_successful_payment(data) -> bool:
     if order.status in ("PAID", "SHIPPED", "DELIVERED"):
         return True
     if paid_kobo != int(round(order.total * 100)):
-        log.warning("Order amount mismatch ref=%s paid=%s expected=%s", reference, paid_kobo, order.total)
         return False
 
     if order.status == "CANCELLED":
@@ -454,7 +440,6 @@ def apply_successful_payment(data) -> bool:
         if any(locked[it.product_id] is None or locked[it.product_id].stock < it.qty for it in order.items):
             order.status = "REFUND_REQUIRED"
             db.session.commit()
-            log.error("PAID AFTER EXPIRY and stock gone - refund needed: %s", reference)
             return False
         for it in order.items:
             locked[it.product_id].stock -= it.qty
@@ -474,31 +459,24 @@ def apply_successful_payment(data) -> bool:
             f"<p><b>Delivery Address:</b> {escape(order.address)}</p><p><b>Phone:</b> {escape(order.phone)}</p>"
             f"<p><a href=\"{escape(dash)}\">Log in and mark it as shipped.</a></p>",
         )
-    log.info("Order %s paid", reference)
     return True
-
 
 # ==================================================================
 # REQUEST HOOKS
 # ==================================================================
 app.before_request(new_csp_nonce)
 
-
 @app.before_request
 def force_https():
     if IS_PROD and not request.is_secure and request.endpoint not in ("paystack_webhook", "static"):
         return redirect(request.url.replace("http://", "https://", 1), code=301)
 
-
 app.before_request(csrf_protect)
 
 _last_maintenance = 0.0
 
-
-# --- FIXED: Removed the stray 's' before the decorator ---
 @app.before_request
 def maintenance():
-    """Expire subscriptions, release stock, and auto-release escrow (runs once a minute)."""
     global _last_maintenance
     if request.endpoint in ("static", "paystack_webhook"):
         return
@@ -509,21 +487,15 @@ def maintenance():
     
     try:
         now = datetime.utcnow()
-        
-        # 1. Expire Subscriptions
         for shop in Shop.query.filter(Shop.subscription_status == "ACTIVE", Shop.subscription_expires_at < now).all():
             shop.subscription_status = "EXPIRED"
             shop.is_approved = False
             
-        # 2. Restock abandoned checkouts (2 hours)
         stale = Order.query.filter(Order.status == "PENDING", Order.created_at < now - PENDING_ORDER_TTL) \
             .with_for_update(skip_locked=True).all()
         for order in stale:
             restock_order(order)
             
-        # 3. Auto-release escrow. There is no "shipped at" column, so measure from when the order was
-        #    placed and use a generous 14 days. The JOIN is essential: without it this query matches
-        #    EVERY shipped item as soon as ANY order in the database is old, paying vendors early.
         escrow_cutoff = now - timedelta(days=14)
         old_shipped_items = (
             OrderItem.query.join(Order, OrderItem.order_id == Order.id)
@@ -538,11 +510,7 @@ def maintenance():
             Shop.query.filter_by(id=item.shop_id).update(
                 {Shop.wallet_balance: Shop.wallet_balance + payout}, synchronize_session=False
             )
-            log.info(f"Auto-released escrow for item {item.id} (Order {item.order.reference})")
             
-        # 4. Abandoned reel uploads. The video is uploaded BEFORE the Paystack payment, so remove
-        #    reels that were never paid for or approved after 24h (otherwise vendors could fill
-        #    your Cloudinary storage for free). At most 5 per run to keep requests fast.
         abandoned = (Reel.query.filter(Reel.is_sponsored.is_(False), Reel.is_approved.is_(False),
                                        Reel.created_at < now - timedelta(hours=24)).limit(5).all())
         for reel in abandoned:
@@ -552,21 +520,17 @@ def maintenance():
             db.session.delete(reel)
 
         db.session.commit()
-        
     except Exception:
         db.session.rollback()
         log.exception("Maintenance failed")
-
 
 @app.context_processor
 def inject_security():
     return {"csrf_token": csrf_token, "csp_nonce": getattr(g, "csp_nonce", "")}
 
-
 @app.after_request
 def security_headers(response):
     return apply_security_headers(response, IS_PROD, CSP_MODE)
-
 
 @app.errorhandler(400)
 @app.errorhandler(403)
@@ -587,7 +551,6 @@ def http_error(e):
         return jsonify({"error": msg}), code
     return render_template("error.html", code=code, message=msg), code
 
-
 @app.errorhandler(500)
 def server_error(e):
     db.session.rollback()
@@ -595,7 +558,6 @@ def server_error(e):
     if request.is_json or request.headers.get("X-CSRFToken") is not None:
         return jsonify({"error": "A server error occurred."}), 500
     return render_template("error.html", code=500, message="Something went wrong on our side."), 500
-
 
 # ==================================================================
 # AUTH
@@ -623,7 +585,6 @@ def login():
             return redirect(nxt if safe_next_url(nxt) else url_for("home"))
         flash("Invalid email or password.", "error")
     return render_template("login.html")
-
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
@@ -664,7 +625,6 @@ def register():
         return redirect(url_for("vendor_apply") if role == "vendor" else url_for("home"))
     return render_template("login.html")
 
-
 @app.route("/logout", methods=["POST"])
 @login_required
 def logout():
@@ -672,20 +632,15 @@ def logout():
     session.clear()
     return redirect(url_for("home"))
 
-
 # ==================================================================
 # PASSWORD RESET
 # ==================================================================
 def _pw_fingerprint(user) -> str:
-    """Changes whenever the password changes, so a reset link dies the moment it is used."""
     return hashlib.sha256(user.password_hash.encode()).hexdigest()[:16]
 
-
 def external_url(endpoint, **values) -> str:
-    """Build an absolute link. Set PUBLIC_BASE_URL in production so emailed links can't be poisoned via the Host header."""
     base = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
     return base + url_for(endpoint, **values) if base else url_for(endpoint, _external=True, **values)
-
 
 @app.route("/reset-password", methods=["GET", "POST"])
 def reset_request():
@@ -704,22 +659,15 @@ def reset_request():
             reset_url = external_url("reset_token", token=token)
             
             send_email(
-                user.email,
-                "Reset Your Mall Password",
-                f"""
-                <h2>Password Reset Request</h2>
-                <p>Hi {escape(user.username)},</p>
-                <p>We received a request to reset your password. Click the link below to choose a new one. This link expires in 1 hour.</p>
-                <p><a href="{escape(reset_url)}" style="padding: 10px 20px; background: #f59e0b; color: white; text-decoration: none; border-radius: 5px; display: inline-block;">Reset Password</a></p>
-                <p>If you didn't request this, you can safely ignore this email.</p>
-                """
+                user.email, "Reset Your Mall Password",
+                f"<h2>Password Reset Request</h2><p>Hi {escape(user.username)},</p>"
+                f"<p>Click the link below to choose a new one. This link expires in 1 hour.</p>"
+                f"<p><a href=\"{escape(reset_url)}\">Reset Password</a></p>"
             )
             
         flash("If that email is registered, a reset link has been sent.", "success")
         return redirect(url_for("login"))
-        
     return render_template("reset_request.html")
-
 
 @app.route("/reset-password/<token>", methods=["GET", "POST"])
 def reset_token(token):
@@ -740,19 +688,14 @@ def reset_token(token):
 
     if request.method == "POST":
         password = request.form.get("password") or ""
-        
         if not (10 <= len(password) <= 128):
             flash("Password must be between 10 and 128 characters.", "error")
             return render_template("reset_password.html", token=token)
-            
         user.password_hash = generate_password_hash(password)
         db.session.commit()
-        
         flash("Your password has been updated! You can now log in.", "success")
         return redirect(url_for("login"))
-
     return render_template("reset_password.html", token=token)
-
 
 # ==================================================================
 # PUBLIC ROUTES
@@ -762,7 +705,6 @@ def _count_view(model, obj_id):
         model.query.filter_by(id=obj_id).update({model.views: model.views + 1}, synchronize_session=False)
         db.session.commit()
 
-
 @app.route("/")
 def home():
     shops = Shop.query.filter_by(is_approved=True).order_by(Shop.created_at.desc()).limit(12).all()
@@ -770,14 +712,12 @@ def home():
                 .order_by(Product.created_at.desc()).limit(16).all())
     return render_template("home.html", shops=shops, products=products)
 
-
 @app.route("/search")
 def search():
     q = clip(request.args.get("q"), 100)
     category = clip(request.args.get("category"), 60)
     page = request.args.get("page", 1, type=int)
     
-    # NEW: Price and Sort filters
     min_price = request.args.get("min_price", type=float)
     max_price = request.args.get("max_price", type=float)
     sort_by = request.args.get("sort", "newest")
@@ -794,19 +734,17 @@ def search():
     if max_price is not None:
         query = query.filter(Product.price <= max_price)
 
-    # Sorting Logic
     if sort_by == "price_asc":
         query = query.order_by(Product.price.asc())
     elif sort_by == "price_desc":
         query = query.order_by(Product.price.desc())
     else:
-        query = query.order_by(Product.created_at.desc()) # Default
+        query = query.order_by(Product.created_at.desc())
 
     pagination = query.paginate(page=page, per_page=12, error_out=False)
     
     return render_template("search.html", products=pagination.items, pagination=pagination, q=q, category=category, 
                            min_price=min_price, max_price=max_price, sort_by=sort_by)
-
 
 @app.route("/shop/<slug>")
 def shop_page(slug):
@@ -814,13 +752,12 @@ def shop_page(slug):
     _count_view(Shop, shop.id)
     page = request.args.get("page", 1, type=int)
     sort_by = request.args.get("sort", "newest")
-
+    
     reviews = Review.query.filter_by(shop_id=shop.id).order_by(Review.created_at.desc()).limit(100).all()
     avg_rating = sum(r.rating for r in reviews) / len(reviews) if reviews else 0.0
     
     query = Product.query.filter_by(shop_id=shop.id, is_active=True)
     
-    # Sorting Logic for Shop
     if sort_by == "price_asc":
         query = query.order_by(Product.price.asc())
     elif sort_by == "price_desc":
@@ -832,20 +769,6 @@ def shop_page(slug):
     
     return render_template("shop.html", shop=shop, reviews=reviews, avg_rating=avg_rating, 
                            products=pagination.items, pagination=pagination, sort_by=sort_by)
-
-@app.route("/shop/<slug>")
-def shop_page(slug):
-    shop = Shop.query.filter_by(slug=slug[:140], is_approved=True).first_or_404()
-    _count_view(Shop, shop.id)
-    page = request.args.get("page", 1, type=int)
-    
-    reviews = Review.query.filter_by(shop_id=shop.id).order_by(Review.created_at.desc()).limit(100).all()
-    avg_rating = sum(r.rating for r in reviews) / len(reviews) if reviews else 0.0
-    
-    pagination = Product.query.filter_by(shop_id=shop.id, is_active=True).order_by(Product.created_at.desc()).paginate(page=page, per_page=12, error_out=False)
-    
-    return render_template("shop.html", shop=shop, reviews=reviews, avg_rating=avg_rating, products=pagination.items, pagination=pagination)
-
 
 @app.route("/shop/<slug>/review", methods=["POST"])
 @login_required
@@ -874,7 +797,6 @@ def add_review(slug):
     flash("Review submitted!", "success")
     return redirect(url_for("shop_page", slug=shop.slug))
 
-
 def _visible_product_or_404(pid):
     p = db.session.get(Product, pid)
     if not p:
@@ -884,13 +806,11 @@ def _visible_product_or_404(pid):
         abort(404)
     return p
 
-
 @app.route("/product/<int:pid>")
 def product_page(pid):
     p = _visible_product_or_404(pid)
     _count_view(Product, p.id)
     return render_template("product.html", p=p)
-
 
 @app.route("/wishlist/toggle/<int:pid>", methods=["POST"])
 @login_required
@@ -907,20 +827,17 @@ def toggle_wishlist(pid):
     db.session.commit()
     return jsonify({"saved": state})
 
-
 @app.route("/wishlist")
 @login_required
 def wishlist():
     items = Wishlist.query.filter_by(user_id=current_user.id).all()
     return render_template("wishlist.html", items=items)
 
-
 @app.route("/reels")
 def reels_feed():
     reels = (Reel.query.filter_by(is_approved=True).join(Shop).filter(Shop.is_approved.is_(True))
              .order_by(Reel.is_sponsored.desc(), Reel.created_at.desc()).limit(30).all())
     return render_template("reels.html", reels=reels)
-
 
 @app.route("/reels/<int:rid>/like", methods=["POST"])
 @login_required
@@ -937,7 +854,6 @@ def like_reel(rid):
     db.session.commit()
     return jsonify({"likes": r.likes})
 
-
 @app.route("/reels/<int:rid>/view", methods=["POST"])
 @rate_limit(120, 60, "reelview")
 def view_reel(rid):
@@ -945,7 +861,6 @@ def view_reel(rid):
         Reel.query.filter_by(id=rid, is_approved=True).update({Reel.views: Reel.views + 1}, synchronize_session=False)
         db.session.commit()
     return jsonify({"ok": True})
-
 
 # ==================================================================
 # CHAT
@@ -973,7 +888,6 @@ def chat(slug):
     } for m in conv.messages[-200:]]
     return render_template("chat.html", conv=conv, shop=shop, history=history)
 
-
 # ==================================================================
 # CART & CHECKOUT
 # ==================================================================
@@ -981,10 +895,8 @@ def chat(slug):
 def cart():
     return render_template("cart.html")
 
-
 class CheckoutError(Exception):
     pass
-
 
 @app.route("/checkout", methods=["POST"])
 @login_required
@@ -1054,7 +966,6 @@ def checkout():
         return jsonify({"error": "Payment gateway error. Please try again."}), 502
     return jsonify({"authorization_url": auth_url, "reference": order.reference})
 
-
 @app.route("/payment-success/<reference>")
 @login_required
 @rate_limit(30, 600, "payret", per_user=True)
@@ -1067,16 +978,14 @@ def payment_success(reference):
             db.session.refresh(order)
     return render_template("payment_success.html", order=order)
 
-
 @app.route("/profile", methods=["GET", "POST"])
 @login_required
 def profile():
     if current_user.role == "vendor":
-        return redirect(url_for("dashboard")) # Vendors use the vendor dashboard
+        return redirect(url_for("dashboard"))
         
     if request.method == "POST":
         action = request.form.get("action")
-        
         if action == "update_info":
             new_username = clip(request.form.get("username"), 50)
             new_email = clip(request.form.get("email"), 120).lower()
@@ -1110,9 +1019,7 @@ def profile():
 
     my_orders_count = Order.query.filter_by(customer_id=current_user.id).count()
     wishlist_count = Wishlist.query.filter_by(user_id=current_user.id).count()
-    
     return render_template("profile.html", orders_count=my_orders_count, wishlist_count=wishlist_count)
-
 
 @app.route("/order/confirm-delivery/<int:item_id>", methods=["POST"])
 @login_required
@@ -1129,6 +1036,11 @@ def confirm_delivery(item_id):
         flash("Delivery confirmed! Funds released to vendor.", "success")
     return redirect(url_for("orders"))
 
+@app.route("/orders")
+@login_required
+def orders():
+    my_orders = Order.query.filter_by(customer_id=current_user.id).order_by(Order.created_at.desc()).all()
+    return render_template("orders.html", orders=my_orders)
 
 # ==================================================================
 # PAYSTACK WEBHOOK
@@ -1160,7 +1072,6 @@ def paystack_webhook():
                 log.exception("Webhook processing failed")
                 return "", 500
     return "", 200
-
 
 # ==================================================================
 # VENDOR
@@ -1254,7 +1165,6 @@ def vendor_apply():
         form["social_links"] = "\n".join(from_json_filter(existing.social_links))
     return render_template("apply.html", shop=existing, form=form)
 
-
 @app.route("/vendor/status")
 @login_required
 def vendor_status():
@@ -1263,7 +1173,6 @@ def vendor_status():
     if not current_user.shop:
         return redirect(url_for("vendor_apply"))
     return render_template("vendor_status.html", shop=current_user.shop, fee=ACTIVATION_FEE_NGN)
-
 
 @app.route("/vendor/pay-activation", methods=["GET", "POST"])
 @login_required
@@ -1291,7 +1200,6 @@ def pay_activation():
         return redirect(auth_url)
     return render_template("vendor_pay.html", shop=shop, fee=ACTIVATION_FEE_NGN)
 
-
 @app.route("/vendor/pay-activation/return")
 @login_required
 @rate_limit(30, 600, "actreturn", per_user=True)
@@ -1310,7 +1218,6 @@ def activation_return():
     flash("We haven't received confirmation of your payment yet. If you were charged it will activate shortly.", "error")
     return redirect(url_for("vendor_status"))
 
-
 @app.route("/dashboard")
 @login_required
 def dashboard():
@@ -1326,8 +1233,6 @@ def dashboard():
     if shop.verification_status != "ACTIVE":
         return redirect(url_for("vendor_status"))
 
-    # Paginated: a shop can hold up to MAX_PRODUCTS_PER_SHOP products, far too many to render at once.
-    # Deleted (inactive) products are hidden here; they are only soft-deleted so old orders still work.
     product_pagination = (Product.query.filter_by(shop_id=shop.id, is_active=True)
                           .order_by(Product.created_at.desc())
                           .paginate(page=request.args.get("page", 1, type=int),
@@ -1336,12 +1241,14 @@ def dashboard():
     convos = Conversation.query.filter_by(shop_id=shop.id).order_by(Conversation.created_at.desc()).all()
     order_items = OrderItem.query.filter_by(shop_id=shop.id).order_by(OrderItem.id.desc()).all()
     reels = Reel.query.filter_by(shop_id=shop.id).order_by(Reel.created_at.desc()).all()
+    bank = BankAccount.query.filter_by(shop_id=shop.id).first()
+    
     days_left = max(0, (shop.subscription_expires_at - datetime.utcnow()).days) if shop.subscription_expires_at else 0
     total_sales = sum(i.price * i.qty for i in order_items if i.status in ["PAID", "SHIPPED", "DELIVERED"])
+    
     return render_template("dashboard.html", shop=shop, products=products, order_items=order_items,
                            convos=convos, reels=reels, days_left=days_left, total_sales=total_sales,
-                           product_pagination=product_pagination, max_products=MAX_PRODUCTS_PER_SHOP)
-
+                           product_pagination=product_pagination, max_products=MAX_PRODUCTS_PER_SHOP, bank=bank)
 
 @app.route("/vendor/ship/<int:item_id>", methods=["POST"])
 @login_required
@@ -1355,7 +1262,6 @@ def ship_item(item_id):
         flash("Marked as shipped. Waiting for customer confirmation.", "success")
     return redirect(url_for("dashboard"))
 
-
 def _active_vendor_shop():
     shop = current_user.shop
     if current_user.role != "vendor" or not shop or shop.verification_status != "ACTIVE" \
@@ -1363,9 +1269,7 @@ def _active_vendor_shop():
         return None
     return shop
 
-
 def store_image(f, label):
-    """Validate + upload one image. Returns (url, error). (None, None) means no file was chosen."""
     if not f or not f.filename:
         return None, None
     if not cloudinary_ready():
@@ -1378,10 +1282,9 @@ def store_image(f, label):
         return None, f"{label} upload failed: {g.get('upload_error') or 'unknown error'}"
     return url, None
 
-
 @app.route("/vendor/product/add", methods=["POST"])
 @login_required
-@rate_limit(200, 3600, "addproduct", per_user=True)   # generous: sellers add catalogues in bulk
+@rate_limit(200, 3600, "addproduct", per_user=True)
 def add_product():
     shop = _active_vendor_shop()
     if not shop:
@@ -1398,14 +1301,13 @@ def add_product():
         return redirect(url_for("dashboard"))
     image, err = store_image(request.files.get("image"), "Product image")
     if err:
-        flash(err, "error")           # product is NOT created, so you never get a silent image-less product
+        flash(err, "error")
         return redirect(url_for("dashboard"))
     db.session.add(Product(shop_id=shop.id, name=name, description=clip_text(request.form.get("description"), 3000),
                            price=price, stock=stock, image=image))
     db.session.commit()
     flash("Product added.", "success")
     return redirect(url_for("dashboard"))
-
 
 @app.route("/vendor/product/edit/<int:pid>", methods=["POST"])
 @login_required
@@ -1433,7 +1335,6 @@ def edit_product(pid):
     flash("Product updated successfully.", "success")
     return redirect(url_for("dashboard"))
 
-
 @app.route("/vendor/product/delete/<int:pid>", methods=["POST"])
 @login_required
 def delete_product(pid):
@@ -1441,11 +1342,10 @@ def delete_product(pid):
     product = db.session.get(Product, pid)
     if not shop or not product or product.shop_id != shop.id:
         abort(403)
-    product.is_active = False   # soft delete: old orders keep their product reference
+    product.is_active = False
     db.session.commit()
     flash("Product removed from your shop.", "success")
     return redirect(url_for("dashboard"))
-
 
 @app.route("/vendor/shop/edit", methods=["POST"])
 @login_required
@@ -1471,7 +1371,7 @@ def edit_shop():
     if err1 or err2:
         flash(err1 or err2, "error")
         return redirect(url_for("dashboard"))
-    shop.name = name            # the public URL (slug) is deliberately NOT changed, so old links keep working
+    shop.name = name
     shop.description = clip_text(request.form.get("description"), 2000)
     if phone_raw:
         shop.phone = normalize_phone(phone_raw)
@@ -1484,6 +1384,44 @@ def edit_shop():
     flash("Shop profile updated successfully!", "success")
     return redirect(url_for("dashboard"))
 
+# ==================================================================
+# BANK DETAILS (For Automated Payouts)
+# ==================================================================
+@app.route("/vendor/bank-details", methods=["POST"])
+@login_required
+def save_bank_details():
+    shop = current_user.shop
+    if not shop:
+        return redirect(url_for("home"))
+        
+    bank_name = clip(request.form.get("bank_name"), 100)
+    bank_code = clip(request.form.get("bank_code"), 10)
+    acc_num = re.sub(r"\s", "", request.form.get("account_number") or "")
+    acc_name = clip(request.form.get("account_name"), 100)
+
+    if not bank_name or not bank_code or not acc_name or not re.fullmatch(r"\d{10}", acc_num):
+        flash("Please provide valid bank details (10-digit account number).", "error")
+        return redirect(url_for("dashboard"))
+
+    recipient_code = create_paystack_recipient(acc_name, acc_num, bank_code)
+    if not recipient_code:
+        flash("Could not verify your bank details with Paystack. Please check and try again.", "error")
+        return redirect(url_for("dashboard"))
+
+    bank = BankAccount.query.filter_by(shop_id=shop.id).first()
+    if not bank:
+        bank = BankAccount(shop_id=shop.id)
+        db.session.add(bank)
+        
+    bank.bank_name = bank_name
+    bank.bank_code = bank_code
+    bank.account_number = acc_num
+    bank.account_name = acc_name
+    bank.recipient_code = recipient_code
+    
+    db.session.commit()
+    flash("Bank account saved successfully! You can now withdraw automatically.", "success")
+    return redirect(url_for("dashboard"))
 
 # ==================================================================
 # REEL PROMOTION
@@ -1532,14 +1470,12 @@ def upload_reel():
         metadata={"type": "reel_promotion", "reel_id": reel.id},
     )
     if not auth_url:
-        # No payment link means no promotion: remove the video we just uploaded instead of leaving it behind.
         delete_cloudinary_asset(reel.video_url, "video")
         delete_cloudinary_asset(reel.poster_url, "image")
         db.session.delete(reel)
         db.session.commit()
         return jsonify({"error": "Could not reach Paystack. You have not been charged. Please try again."}), 502
     return jsonify({"authorization_url": auth_url})
-
 
 @app.route("/dashboard/reel/return")
 @login_required
@@ -1557,7 +1493,6 @@ def reel_return():
                 flash("Promotion paid. Your reel will go live once an admin approves it.", "success")
     return redirect(url_for("dashboard"))
 
-
 # ==================================================================
 # WITHDRAWALS
 # ==================================================================
@@ -1568,14 +1503,13 @@ def vendor_withdraw():
     shop = _active_vendor_shop()
     if not shop:
         return redirect(url_for("home"))
-    amount = parse_money(request.form.get("amount"), 1, 50_000_000)
-    bank_name = clip(request.form.get("bank_name"), 100)
-    acc_name = clip(request.form.get("account_name"), 100)
-    acc_num = re.sub(r"\s", "", request.form.get("account_number") or "")
-
-    if not bank_name or not acc_name or not re.fullmatch(r"\d{10}", acc_num):
-        flash("Enter your bank, the account name and a valid 10-digit account number.", "error")
+        
+    bank = BankAccount.query.filter_by(shop_id=shop.id).first()
+    if not bank or not bank.recipient_code:
+        flash("Please set up your bank account details before withdrawing.", "error")
         return redirect(url_for("dashboard"))
+
+    amount = parse_money(request.form.get("amount"), 1, 50_000_000)
     if amount is None:
         flash("Enter a valid amount.", "error")
         return redirect(url_for("dashboard"))
@@ -1586,13 +1520,14 @@ def vendor_withdraw():
         db.session.rollback()
         flash("You cannot withdraw more than your balance.", "error")
         return redirect(url_for("dashboard"))
-    db.session.add(Withdrawal(shop_id=shop.id, amount=amount, bank_name=bank_name,
-                              account_name=acc_name, account_number=acc_num))
+        
+    withdrawal = Withdrawal(shop_id=shop.id, amount=amount, bank_name=bank.bank_name,
+                            account_name=bank.account_name, account_number=bank.account_number)
+    db.session.add(withdrawal)
     db.session.commit()
     audit("withdrawal_requested", shop=shop.id, amount=amount)
-    flash("Withdrawal request submitted! Admin will process it shortly.", "success")
+    flash("Withdrawal request submitted! Admin will approve it shortly.", "success")
     return redirect(url_for("dashboard"))
-
 
 @app.route("/admin/withdrawals")
 @admin_required
@@ -1602,25 +1537,36 @@ def admin_withdrawals():
                .order_by(Withdrawal.processed_at.desc()).limit(20).all())
     return render_template("admin_withdrawals.html", pending=pending, history=history)
 
-
 @app.route("/admin/withdrawals/<int:wid>/approve", methods=["POST"])
 @admin_required
 def admin_approve_withdrawal(wid):
     w = Withdrawal.query.filter_by(id=wid).with_for_update().first_or_404()
+    
     if w.status == "PENDING":
-        w.status = "PAID"
-        w.processed_at = datetime.utcnow()
-        db.session.commit()
-        audit("withdrawal_paid", withdrawal=wid, amount=w.amount, shop=w.shop_id)
-        send_email(
-            w.shop.owner.email, f"Payout Processed - ₦{w.amount:,.2f}",
-            f"<h2>Good news!</h2><p>Hi {escape(w.shop.name)},</p>"
-            f"<p>Your withdrawal of <b>₦{w.amount:,.2f}</b> has been processed:</p>"
-            f"<p><b>Bank:</b> {escape(w.bank_name)}<br><b>Account:</b> {escape(w.account_number)}</p>",
-        )
-        flash("Withdrawal marked as Paid.", "success")
-    return redirect(url_for("admin_withdrawals"))
+        bank = BankAccount.query.filter_by(shop_id=w.shop_id).first()
+        if not bank or not bank.recipient_code:
+            flash("This vendor has no valid Paystack recipient code. Cannot auto-pay.", "error")
+            return redirect(url_for("admin_withdrawals"))
 
+        success, response = initiate_paystack_transfer(w.amount, bank.recipient_code, f"Withdrawal for {w.shop.name}")
+        
+        if success:
+            w.status = "PAID"
+            w.processed_at = datetime.utcnow()
+            db.session.commit()
+            audit("withdrawal_paid_auto", withdrawal=wid, amount=w.amount, shop=w.shop_id)
+            
+            send_email(
+                w.shop.owner.email, f"Payout Processed - ₦{w.amount:,.2f}",
+                f"<h2>Good news!</h2><p>Hi {escape(w.shop.name)},</p>"
+                f"<p>Your withdrawal of <b>₦{w.amount:,.2f}</b> has been automatically sent to your bank:</p>"
+                f"<p><b>Bank:</b> {escape(w.bank_name)}<br><b>Account:</b> {escape(w.account_number)}</p>",
+            )
+            flash("Withdrawal approved and money sent via Paystack automatically!", "success")
+        else:
+            flash("Paystack Transfer failed. Please try again later.", "error")
+            
+    return redirect(url_for("admin_withdrawals"))
 
 @app.route("/admin/withdrawals/<int:wid>/reject", methods=["POST"])
 @admin_required
@@ -1635,7 +1581,6 @@ def admin_reject_withdrawal(wid):
         audit("withdrawal_rejected", withdrawal=wid, shop=w.shop_id)
         flash("Withdrawal rejected and funds returned to vendor.", "success")
     return redirect(url_for("admin_withdrawals"))
-
 
 # ==================================================================
 # ADMIN
@@ -1658,7 +1603,6 @@ def admin_dashboard():
     }
     return render_template("admin_dashboard.html", stats=stats)
 
-
 @app.route("/admin/applications")
 @admin_required
 def admin_applications():
@@ -1668,7 +1612,6 @@ def admin_applications():
         approved=Shop.query.filter_by(verification_status="APPROVED").all(),
         rejected=Shop.query.filter_by(verification_status="REJECTED").all(),
         active=Shop.query.filter_by(verification_status="ACTIVE").all())
-
 
 @app.route("/admin/applications/<int:sid>/approve", methods=["POST"])
 @admin_required
@@ -1690,7 +1633,6 @@ def admin_approve(sid):
     )
     flash(f"{shop.name} approved.", "success")
     return redirect(url_for("admin_applications"))
-
 
 @app.route("/admin/applications/<int:sid>/reject", methods=["POST"])
 @admin_required
@@ -1714,14 +1656,12 @@ def admin_reject(sid):
     flash("Shop rejected.", "success")
     return redirect(url_for("admin_applications"))
 
-
 @app.route("/admin/reels")
 @admin_required
 def admin_reels():
     pending = Reel.query.filter_by(is_approved=False).order_by(Reel.created_at.desc()).all()
     approved = Reel.query.filter_by(is_approved=True).order_by(Reel.created_at.desc()).all()
     return render_template("admin_reels.html", pending=pending, approved=approved)
-
 
 @app.route("/admin/reels/<int:rid>/approve", methods=["POST"])
 @admin_required
@@ -1733,7 +1673,6 @@ def admin_approve_reel(rid):
     flash("Reel approved.", "success")
     return redirect(url_for("admin_reels"))
 
-
 @app.route("/admin/reels/<int:rid>/reject", methods=["POST"])
 @admin_required
 def admin_reject_reel(rid):
@@ -1744,7 +1683,6 @@ def admin_reject_reel(rid):
     audit("reel_removed", reel=rid)
     flash("Reel removed.", "success")
     return redirect(url_for("admin_reels"))
-
 
 # ==================================================================
 # CLI
@@ -1763,7 +1701,6 @@ def create_admin(email, username, password):
                         password_hash=generate_password_hash(password)))
     db.session.commit()
     click.echo(f"Admin {email} created.")
-
 
 @app.cli.command("seed-demo")
 @click.option("--force", is_flag=True, help="Allow in production (not recommended).")
@@ -1789,11 +1726,10 @@ def seed_demo(force):
         click.echo(f"{email}  /  {pw}")
     db.session.commit()
 
-
 with app.app_context():
     db.create_all()
 
 if __name__ == "__main__":
     dev = APP_ENV == "development"
     socketio.run(app, debug=dev, host="127.0.0.1" if dev else "0.0.0.0",
-                 port=int(os.environ.get("PORT", 5000)), allow_unsafe_werkzeug=dev)
+                 port=int(os.environ.get("PORT", 5000)), allow_unsafe_werkzeug=dev)~

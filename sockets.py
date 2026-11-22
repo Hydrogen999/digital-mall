@@ -11,7 +11,14 @@ MAX_MESSAGE_LEN = 1000
 # Same-origin only by default. If the site is served from several origins
 # (e.g. a custom domain + onrender.com), list them: ALLOWED_ORIGINS="https://a.com,https://b.com"
 _origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
-socketio = SocketIO(cors_allowed_origins=_origins or None, max_http_buffer_size=16 * 1024)
+# "threading" avoids eventlet entirely. Eventlet must monkey-patch Python's networking before anything else
+# loads, and when that goes wrong every outbound HTTPS call (Cloudinary, Paystack) crashes with
+# "maximum recursion depth exceeded". Set SOCKETIO_ASYNC_MODE=eventlet only if you really want it back.
+socketio = SocketIO(
+    async_mode=os.environ.get("SOCKETIO_ASYNC_MODE", "threading"),
+    cors_allowed_origins=_origins or None,
+    max_http_buffer_size=16 * 1024,
+)
 
 
 def _conversation_for(data):

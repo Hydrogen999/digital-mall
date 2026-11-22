@@ -12,6 +12,9 @@ Pillow>=12.0.0
 python-dotenv>=1.0.1,<2
 requests>=2.32.4,<3
 gunicorn>=23.0.0,<24
+# eventlet is no longer used by the app (see sockets.py). Keep it until your Render start command is
+# switched to gthread, then delete this line.
 eventlet>=0.40.3,<1
+simple-websocket>=1.0.0,<2
 psycopg2-binary>=2.9.9,<3
 cloudinary>=1.41.0,<2

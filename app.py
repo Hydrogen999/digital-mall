@@ -296,6 +296,17 @@ def upload_private_id(stream):
     return ("private:" + res["public_id"]) if res else None
 
 
+def delete_cloudinary_asset(url, resource_type="image"):
+    """Best-effort removal of an asset we uploaded (used for abandoned, unpaid reel uploads)."""
+    m = re.search(r"/upload/(?:v\d+/)?(.+?)(?:\.[A-Za-z0-9]+)?$", url or "")
+    if not m or not cloudinary_ready():
+        return
+    try:
+        cloudinary.uploader.destroy(m.group(1), resource_type=resource_type, invalidate=True)
+    except Exception:
+        log.exception("Could not delete Cloudinary asset %s", m.group(1))
+
+
 @app.template_filter("kyc_url")
 def kyc_url_filter(value):
     if not value:
@@ -527,6 +538,17 @@ def maintenance():
             )
             log.info(f"Auto-released escrow for item {item.id} (Order {item.order.reference})")
             
+        # 4. Abandoned reel uploads. The video is uploaded BEFORE the Paystack payment, so remove
+        #    reels that were never paid for or approved after 24h (otherwise vendors could fill
+        #    your Cloudinary storage for free). At most 5 per run to keep requests fast.
+        abandoned = (Reel.query.filter(Reel.is_sponsored.is_(False), Reel.is_approved.is_(False),
+                                       Reel.created_at < now - timedelta(hours=24)).limit(5).all())
+        for reel in abandoned:
+            delete_cloudinary_asset(reel.video_url, "video")
+            delete_cloudinary_asset(reel.poster_url, "image")
+            ReelLike.query.filter_by(reel_id=reel.id).delete()
+            db.session.delete(reel)
+
         db.session.commit()
         
     except Exception:
@@ -1414,7 +1436,12 @@ def upload_reel():
         metadata={"type": "reel_promotion", "reel_id": reel.id},
     )
     if not auth_url:
-        return jsonify({"error": "Payment gateway error."}), 502
+        # No payment link means no promotion: remove the video we just uploaded instead of leaving it behind.
+        delete_cloudinary_asset(reel.video_url, "video")
+        delete_cloudinary_asset(reel.poster_url, "image")
+        db.session.delete(reel)
+        db.session.commit()
+        return jsonify({"error": "Could not reach Paystack. You have not been charged. Please try again."}), 502
     return jsonify({"authorization_url": auth_url})
 
 

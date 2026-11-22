@@ -37,9 +37,11 @@
             
             <div class="flex gap-2">
               <form method="POST" action="{{ url_for('admin_approve_reel', rid=r.id) }}" class="flex-1">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button class="w-full py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold transition">Approve</button>
               </form>
               <form method="POST" action="{{ url_for('admin_reject_reel', rid=r.id) }}" class="flex-1">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button class="w-full py-2 bg-red-500/20 text-red-400 hover:bg-red-500 hover:text-white rounded-lg text-xs font-bold transition">Reject</button>
               </form>
             </div>

@@ -91,12 +91,14 @@
 
           <div class="flex flex-wrap gap-3 pt-4 border-t border-slate-100">
             <form method="POST" action="{{ url_for('admin_approve', sid=s.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="px-6 py-2.5 bg-slate-900 hover:bg-black text-white rounded-xl text-sm font-bold shadow-soft transition flex items-center gap-2">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
                 Approve Shop
               </button>
             </form>
-            <form method="POST" action="{{ url_for('admin_reject', sid=s.id) }}" onsubmit="return promptForReason(this)">
+            <form method="POST" action="{{ url_for('admin_reject', sid=s.id) }}" data-prompt-reason>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="reason">
               <button class="px-6 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 rounded-xl text-sm font-bold transition flex items-center gap-2">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -120,12 +122,4 @@
   </div>
 </div>
 
-<script>
-  function promptForReason(form) {
-    const reason = prompt("Reason for rejecting this application:");
-    if (!reason || reason.trim().length < 5) return false;
-    form.reason.value = reason.trim();
-    return true;
-  }
-</script>
 {% endblock %}

@@ -57,7 +57,7 @@
       <!-- Action Buttons -->
       <div class="mt-auto space-y-4">
         <div class="flex gap-3">
-                   <button data-add-to-cart='{{ {"id": p.id, "name": p.name, "price": p.price, "image": p.image} | tojson }}' 
+          <button data-add-to-cart='{{ {"id": p.id, "name": p.name, "price": p.price, "image": p.image} | tojson }}' 
                   {% if p.stock == 0 %}disabled{% endif %}
                   class="flex-1 py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-bold text-lg shadow-float transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg>
@@ -97,35 +97,4 @@
 {% endblock %}
 
 {% block scripts %}
-<script nonce="{{ csp_nonce }}">
-  document.addEventListener('click', function(e) {
-    const btn = e.target.closest('[data-add-to-cart]');
-    if (!btn) return;
-
-    const item = JSON.parse(btn.getAttribute('data-add-to-cart'));
-    const KEY = "mall_cart";
-    let cart = JSON.parse(localStorage.getItem(KEY) || "[]");
-    const existing = cart.find(i => i.id === item.id);
-    
-    if (existing) existing.qty += 1;
-    else cart.push({ ...item, qty: 1 });
-    
-    localStorage.setItem(KEY, JSON.stringify(cart));
-
-    // Update badge
-    const count = cart.reduce((sum, i) => sum + i.qty, 0);
-    document.getElementById("nav-cart-count").innerText = count;
-
-    const originalText = btn.innerHTML;
-    btn.innerHTML = "✓ Added to Cart";
-    btn.classList.add("bg-emerald-600");
-    btn.classList.remove("bg-slate-900", "hover:bg-slate-800");
-    
-    setTimeout(() => {
-      btn.innerHTML = originalText;
-      btn.classList.remove("bg-emerald-600");
-      btn.classList.add("bg-slate-900", "hover:bg-slate-800");
-    }, 2000);
-  });
-</script>
 {% endblock %}

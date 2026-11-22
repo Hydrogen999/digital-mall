@@ -25,7 +25,7 @@ from flask_login import current_user
 from PIL import Image, ImageOps
 
 # Refuse decompression bombs (default Pillow limit only warns).
-Image.MAX_IMAGE_PIXELS = 40_000_000
+Image.MAX_IMAGE_PIXELS = 100_000_000
 
 # Endpoints that cannot carry a CSRF token (server-to-server callbacks).
 CSRF_EXEMPT_ENDPOINTS = {"paystack_webhook"}
@@ -86,10 +86,10 @@ def build_csp(nonce: str, host: str, is_prod: bool) -> str:
         "default-src 'self'",
         f"script-src 'self' 'nonce-{nonce}' https://cdn.tailwindcss.com https://cdn.socket.io",
         # Tailwind's CDN build injects <style>; remove 'unsafe-inline' once Tailwind is built locally.
-        "style-src 'self' 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
         "img-src 'self' data: https://res.cloudinary.com",
         "media-src 'self' https://res.cloudinary.com",
-        "font-src 'self' data:",
+        "font-src 'self' data: https://fonts.gstatic.com",
         f"connect-src 'self' wss://{host} ws://{host}" if not is_prod else f"connect-src 'self' wss://{host}",
         "object-src 'none'",
         "base-uri 'self'",
@@ -203,8 +203,10 @@ def safe_http_url(url: str, max_len: int = 200):
 # ------------------------------------------------------------------
 IMAGE_EXT = {"png", "jpg", "jpeg", "webp", "gif"}
 VIDEO_EXT = {"mp4", "webm", "mov"}
-MAX_IMAGE_BYTES = 5 * 1024 * 1024
-MAX_VIDEO_BYTES = 15 * 1024 * 1024  # stays under MAX_CONTENT_LENGTH
+MAX_IMAGE_BYTES = 15 * 1024 * 1024   # raw upload; big phone photos are shrunk below, not rejected
+MAX_GIF_BYTES = 5 * 1024 * 1024
+MAX_VIDEO_BYTES = 50 * 1024 * 1024   # must stay under MAX_CONTENT_LENGTH in app.py
+MAX_IMAGE_SIDE = 2000                # longest edge after shrinking (plenty for a shop page)
 _PIL_TO_EXT = {"JPEG": "jpg", "PNG": "png", "WEBP": "webp", "GIF": "gif"}
 
 
@@ -241,13 +243,18 @@ def sanitize_upload(f, kind: str):
             f.stream.seek(0)
             img = Image.open(f.stream)        # verify() invalidates the object
             if fmt == "GIF":
+                if size > MAX_GIF_BYTES:
+                    return None
                 f.stream.seek(0)              # keep animation; already structurally verified
                 return f.stream
+            if fmt == "JPEG":
+                img.draft("RGB", (MAX_IMAGE_SIDE * 2, MAX_IMAGE_SIDE * 2))  # decode big JPEGs at lower res: saves RAM
             img = ImageOps.exif_transpose(img)
             if fmt == "JPEG" and img.mode not in ("RGB", "L"):
                 img = img.convert("RGB")
+            img.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE))   # shrink only if larger; keeps aspect ratio
             out = io.BytesIO()
-            save_kwargs = {"quality": 88, "optimize": True} if fmt in ("JPEG", "WEBP") else {}
+            save_kwargs = {"quality": 85, "optimize": True} if fmt in ("JPEG", "WEBP") else {}
             img.save(out, format=fmt, **save_kwargs)   # no exif= argument -> metadata dropped
             out.seek(0)
             out.name = f"upload.{_PIL_TO_EXT[fmt]}"

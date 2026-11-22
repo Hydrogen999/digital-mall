@@ -63,7 +63,7 @@
 
   // ---- Delegated click handlers (data-* attributes) ----------------------------------
   document.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-add-to-cart],[data-wishlist],[data-dialog-open],[data-dialog-close],[data-select-role],[data-hide]");
+    const t = e.target.closest("[data-add-to-cart],[data-wishlist],[data-dialog-open],[data-dialog-close],[data-select-role],[data-hide],[data-edit-product]");
     if (!t) return;
     if (t.dataset.addToCart) {
       try { addToCart(JSON.parse(t.dataset.addToCart), t); } catch { /* ignore malformed data */ }
@@ -77,12 +77,15 @@
       selectRole(t.dataset.selectRole);
     } else if (t.dataset.hide) {
       document.getElementById(t.dataset.hide)?.classList.add("hidden");
+    } else if (t.dataset.editProduct) {
+      try { window.openEditProduct?.(JSON.parse(t.dataset.editProduct)); } catch { /* ignore */ }
     }
   });
 
   // ---- Admin: ask for a rejection reason before submitting ---------------------------
   document.addEventListener("submit", (e) => {
     const form = e.target;
+    if (form.matches("[data-confirm]") && !confirm(form.dataset.confirm)) { e.preventDefault(); return; }
     if (form.matches("[data-prompt-reason]")) {
       const reason = prompt("Reason for rejecting this application:");
       if (!reason || reason.trim().length < 5) { e.preventDefault(); return; }

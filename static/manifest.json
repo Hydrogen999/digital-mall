@@ -8,12 +8,12 @@
   "theme_color": "#0f172a",
   "icons": [
     {
-      "src": "/static/icon-192.png",
+      "src": "https://res.cloudinary.com/sslozmut/image/upload/f_auto/q_auto/icon-192.png",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "/static/icon-512.png",
+      "src": "https://res.cloudinary.com/sslozmut/image/upload/f_auto/q_auto/icon-192.png",
       "sizes": "512x512",
       "type": "image/png"
     }

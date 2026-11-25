@@ -14,16 +14,21 @@ from decimal import Decimal, InvalidOperation
 from functools import wraps
 from urllib.parse import quote
 
+import os
+import os
 import sentry_sdk
 from sentry_sdk.integrations.flask import FlaskIntegration
 
-sentry_sdk.init(
-    dsn="YOUR_SENTRY_DSN_URL_HERE",
-    integrations=[FlaskIntegration()],
-    traces_sample_rate=1.0
-)
-
-from itsdangerous import URLSafeTimedSerializer
+# Only start Sentry if a DSN is actually provided
+SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
+if SENTRY_DSN and SENTRY_DSN.startswith("http"):
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[FlaskIntegration()],
+        traces_sample_rate=1.0
+    )
+else:
+    print("⚠️ Sentry is disabled because SENTRY_DSN is not set.")
 
 import click
 import cloudinary
@@ -74,7 +79,7 @@ IS_PROD = APP_ENV != "development"
 
 # NEW: Admin IP Whitelist
 ADMIN_ALLOWED_IPS = {
-    "102.89.33.45",  # Replace with YOUR actual IP address
+    "10.232.178.1",  # Replace with YOUR actual IP address
     "127.0.0.1",     # Allows localhost for local testing
     "0.0.0.0"
 }

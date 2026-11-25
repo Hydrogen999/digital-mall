@@ -14,21 +14,9 @@ from decimal import Decimal, InvalidOperation
 from functools import wraps
 from urllib.parse import quote
 
-import os
-import os
-import sentry_sdk
-from sentry_sdk.integrations.flask import FlaskIntegration
-
-# Only start Sentry if a DSN is actually provided
-SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
-if SENTRY_DSN and SENTRY_DSN.startswith("http"):
-    sentry_sdk.init(
-        dsn=SENTRY_DSN,
-        integrations=[FlaskIntegration()],
-        traces_sample_rate=1.0
-    )
-else:
-    print("⚠️ Sentry is disabled because SENTRY_DSN is not set.")
+# --- ADD THIS IF IT'S MISSING ---
+from itsdangerous import URLSafeTimedSerializer
+# --------------------------------
 
 import click
 import cloudinary
@@ -47,11 +35,24 @@ from sqlalchemy.pool import NullPool
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
+# Sentry Setup (Safe version)
+import sentry_sdk
+from sentry_sdk.integrations.flask import FlaskIntegration
+
+SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
+if SENTRY_DSN and SENTRY_DSN.startswith("http"):
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[FlaskIntegration()],
+        traces_sample_rate=1.0
+    )
+
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
+# ... (the rest of your imports)
 
 from models import (
     Conversation, Order, OrderItem, Product, Reel, ReelLike, Review,

@@ -14,6 +14,15 @@ from decimal import Decimal, InvalidOperation
 from functools import wraps
 from urllib.parse import quote
 
+import sentry_sdk
+from sentry_sdk.integrations.flask import FlaskIntegration
+
+sentry_sdk.init(
+    dsn="YOUR_SENTRY_DSN_URL_HERE",
+    integrations=[FlaskIntegration()],
+    traces_sample_rate=1.0
+)
+
 from itsdangerous import URLSafeTimedSerializer
 
 import click
@@ -56,6 +65,19 @@ audit_log = logging.getLogger("mall.audit")
 # ==================================================================
 # CONFIG
 # ==================================================================
+# ==================================================================
+# CONFIG
+# ==================================================================
+APP_ENV = os.environ.get("APP_ENV", "production").lower()
+IS_PROD = APP_ENV != "development"
+# ... (existing configs) ...
+
+# NEW: Admin IP Whitelist
+ADMIN_ALLOWED_IPS = {
+    "102.89.33.45",  # Replace with YOUR actual IP address
+    "127.0.0.1",     # Allows localhost for local testing
+    "0.0.0.0"
+}
 APP_ENV = os.environ.get("APP_ENV", "production").lower()
 IS_PROD = APP_ENV != "development"
 CSP_MODE = os.environ.get("CSP_MODE", "report-only").lower()
@@ -220,8 +242,16 @@ def admin_required(fn):
     def wrapper(*a, **kw):
         if not current_user.is_authenticated:
             return login_manager.unauthorized()
+        
+        # 1. Check if they are an admin
         if current_user.role != "admin":
             abort(404)
+            
+        # 2. NEW: Check if their IP is whitelisted
+        if IS_PROD and client_ip() not in ADMIN_ALLOWED_IPS:
+            log.warning(f"🚨 BLOCKED Admin access from IP: {client_ip()} (User: {current_user.email})")
+            abort(404) # Pretend the page doesn't exist so hackers get confused
+            
         return fn(*a, **kw)
     return wrapper
 
@@ -523,6 +553,26 @@ def maintenance():
     except Exception:
         db.session.rollback()
         log.exception("Maintenance failed")
+
+@app.before_request
+def check_session_validity():
+    """Invalidates active sessions if the user's password has changed."""
+    if current_user.is_authenticated:
+        # Create a fingerprint of the user's current password
+        current_fingerprint = hashlib.sha256(current_user.password_hash.encode()).hexdigest()
+        
+        # Check if the session has a fingerprint saved
+        session_fingerprint = session.get("pw_fingerprint")
+        
+        if session_fingerprint and session_fingerprint != current_fingerprint:
+            # Password changed! Log them out immediately.
+            logout_user()
+            session.clear()
+            flash("Your password was recently changed. Please log in again.", "error")
+            return redirect(url_for("login"))
+        
+        # Save the current fingerprint to the session
+        session["pw_fingerprint"] = current_fingerprint        
 
 @app.context_processor
 def inject_security():
